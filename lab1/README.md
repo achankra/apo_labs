@@ -56,6 +56,8 @@ python --version
 
 ## 🔵 Step 1 — Create the k3d cluster
 
+A k3d cluster is a lightweight Kubernetes environment running entirely inside Docker containers on your laptop. You are creating 3 nodes: 1 control-plane node (the server that schedules workloads and manages state) and 2 worker nodes (the agents that actually run your pods). The agent count matters for the blast-radius gate in Step 4 — that gate calculates what fraction of running pods would be restarted, and that fraction depends on how many pods are spread across the nodes.
+
 ```bash
 k3d cluster create apo-lab --agents 2
 kubectl get nodes   # expect: 1 server + 2 agents = Ready
@@ -68,6 +70,10 @@ kubectl get nodes   # expect: 1 server + 2 agents = Ready
 > [!TIP]
 > **PROVIDED** — `lab1/payment-service/` is complete. `app.py` is a FastAPI service with `/checkout`, `/toggle_fault`, `/metrics`, and `/health`. Do not modify any of these files.
 
+The payment-service is the target system for every lab. It is a minimal FastAPI app that simulates a production checkout endpoint. `/checkout` generates realistic latency and error metrics under normal conditions; `/toggle_fault` injects artificial high latency and elevated error rates, which is what you'll use later to trigger your APO agent. `/metrics` exposes the Prometheus-format data that Prometheus scrapes every 15 seconds.
+
+`k3d image import` loads the locally built Docker image directly into the cluster's internal image registry, bypassing Docker Hub entirely. This is what makes the lab work offline and avoids `ImagePullBackOff` errors that happen when k3d tries to pull an image from the internet.
+
 ```bash
 cd lab1/payment-service
 docker build -t payment-service:lab .
@@ -77,13 +83,13 @@ kubectl rollout status deployment/payment-service
 kubectl get pods   # expect: 2/2 Running
 ```
 
-Run port-forward in a **separate terminal window**:
+Run port-forward in a **separate terminal window** so it stays active:
 
 ```bash
 kubectl port-forward svc/payment-service 8080:80
 ```
 
-Verify:
+Verify the service is up and exposing metrics:
 
 ```bash
 curl http://localhost:8080/health
@@ -98,6 +104,10 @@ curl http://localhost:8080/metrics
 
 > [!TIP]
 > **PROVIDED** — `lab1/prometheus-config.yaml` contains the scrape config, Prometheus Deployment, and NodePort Service. Do not modify this file.
+
+Prometheus is the metrics store that your APO agent reads in real mode. It scrapes the `/metrics` endpoint on the payment-service every 15 seconds, storing the RED metrics (Rate, Errors, Duration) that drive the confidence formula. Without Prometheus, the agent would have no data signal — it would not know whether the service is healthy or degraded.
+
+The configmap approach stores the Prometheus scrape configuration as a Kubernetes resource rather than baking it into the Docker image. This means you can inspect and update the scrape config with `kubectl` just like any other workload config, and the change takes effect without rebuilding or pushing a new container image.
 
 ```bash
 kubectl create namespace monitoring
@@ -114,7 +124,7 @@ Run port-forward in a **separate terminal window**:
 kubectl port-forward -n monitoring svc/prometheus 9090:9090
 ```
 
-Open [http://localhost:9090/targets](http://localhost:9090/targets) — payment-service should appear as **UP**.
+Open [http://localhost:9090/targets](http://localhost:9090/targets) — payment-service should appear as **UP**. If it shows **DOWN**, the scrape config path is wrong or the port-forward is not running.
 
 ---
 
@@ -132,6 +142,13 @@ Open [http://localhost:9090/targets](http://localhost:9090/targets) — payment-
 
 > [!TIP]
 > **PROVIDED** — `ActionProposal` and `GateResult` dataclasses, `GateConfig` with the lab thresholds, the `evaluate()` orchestration method, and four test cases are all written. Run the tests to verify your gates.
+
+Safety gates are binary pass/fail checks that run before any action is committed. All four must pass before the agent proceeds; a single rejection blocks execution regardless of how high the confidence score is. Each gate protects against a different failure mode:
+
+- **Cost gate** — prevents runaway automation from exceeding your hourly spend envelope. An agent that restarts pods every 5 minutes at $1,200/hr cost would quickly exceed budget even if each individual action is correct.
+- **Blast radius gate** — ensures no single remediation action touches more than a fixed fraction of running pods at once. A rolling restart that hits 100% of pods simultaneously is an outage, not a fix.
+- **Reversibility gate** — rejects actions that cannot be undone faster than your incident SLO. If reverting an action takes 20 minutes and your SLO is a 5-minute restore time, the action itself becomes the incident.
+- **Time gate** — enforces change-freeze windows during peak traffic hours. Even a correct action carries higher blast radius when traffic is at its daily maximum.
 
 Lab thresholds:
 
@@ -172,6 +189,8 @@ Open `diagnostic_agent_starter.py`. Implement three things:
 
 ### A. `detect_symptom_class(metrics)`
 
+Binary gates answer "is this action allowed?" The confidence scorer answers "how certain are we that this is the right action right now?" But first the agent needs to classify what it is seeing. `detect_symptom_class` maps raw metric values to a named symptom — MEMORY_PRESSURE, DB_BOTTLENECK, etc. — that the confidence scorer and action selector then use. Without symptom classification, every incident looks the same and the agent cannot select the right remediation action.
+
 > [!IMPORTANT]
 > **YOUR TASK** — Apply these rules in order:
 
@@ -184,6 +203,8 @@ Open `diagnostic_agent_starter.py`. Implement three things:
 | 5 | else | `UNKNOWN` |
 
 ### B. `ConfidenceScorer.compute(metrics, symptom_class, action_id)`
+
+The confidence score combines four independent evidence signals into a single composite score. Using multiple signals instead of one makes the score more robust — a fresh but historically unusual metric reading gets tempered by the history signal, and a stale reading gets penalized by the freshness signal. The agent acts autonomously only when the composite score exceeds a threshold; below the threshold, it escalates to a human instead.
 
 > [!IMPORTANT]
 > **YOUR TASK** — Implement the formula: `C = 0.35×S + 0.25×H + 0.25×R + 0.15×F`
@@ -223,6 +244,8 @@ C (Composite):  0.84xx
 ---
 
 ## 🔵 Step 6 — Inject a fault and observe *(bonus — real cluster only)*
+
+`/toggle_fault` flips a flag inside the payment-service that injects artificial latency and raises the error rate. After toggling it, wait about 30 seconds for Prometheus to scrape the degraded metrics, then run the agent in real mode. You should see the agent detect the degradation, score high confidence, pass all four gates, and recommend the remediation action — the full autonomous decision loop on live data.
 
 **macOS / Linux:**
 

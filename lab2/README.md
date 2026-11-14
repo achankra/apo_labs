@@ -43,6 +43,8 @@
 > [!TIP]
 > **PROVIDED** — `action_catalog.yaml` is complete. Open it and read it; you will not modify it. Each action specifies `risk_class`, `blast_radius_max`, `reversal_time_seconds`, `required_confidence`, `max_executions_per_hour`, `cooldown_seconds`, and `symptom_classes`. This is what APO agents consult before proposing an action.
 
+An action catalog is the boundary of what an APO agent is authorized to do. By defining approved remediation actions as data (a YAML file) rather than code, operators can tighten or expand agent authority without modifying the agent itself or deploying a new version. Each catalog entry also carries the risk metadata that the gates in Lab 1 need — blast radius, reversal time — so the gates can evaluate any proposal without understanding the action's implementation details. The catalog is also the place where `max_executions_per_hour` and `cooldown_seconds` are enforced, preventing the agent from repeatedly executing the same action if the first attempt did not resolve the issue.
+
 ---
 
 ## ✏️ Step 2 — Implement `load_action_catalog()`
@@ -59,6 +61,8 @@ with open(path) as f:
     raw = yaml.safe_load(f)
 return {a["action_id"]: a for a in raw["actions"]}
 ```
+
+`yaml.safe_load` is the secure parser variant — unlike `yaml.load`, it cannot execute arbitrary Python code embedded in the YAML file. This matters for a catalog that operators edit, since a misconfigured catalog should produce a parse error, not code execution.
 
 Install pyyaml if needed:
 
@@ -85,6 +89,10 @@ pip3 install pyyaml
 
 > [!TIP]
 > **PROVIDED** — `simulate` and `dry_run` flags are wired into the starter. In simulate mode the executor returns a canned success dict without calling kubectl.
+
+Using `subprocess.run` keeps a clean separation between the decision layer (which only scores and gates) and the execution layer (which actually calls kubectl). This boundary means you can unit-test the decision logic without a cluster, and you can audit exactly what commands the agent runs by logging `subprocess.run`'s arguments.
+
+A rolling restart tells Kubernetes to replace each pod one at a time, waiting for the new pod to pass its readiness probe before terminating the old one. This achieves zero-downtime remediation for many classes of problems (memory leaks, stale connections, misconfigured environment variables). The `dry_run` flag lets you test the full decision path in a live environment without actually restarting any pods — useful for validating gate logic during an incident without taking additional risk.
 
 **macOS / Linux:**
 
@@ -139,6 +147,10 @@ python autonomous_agent_starter.py --simulate --dry-run
 > [!TIP]
 > **PROVIDED** — In simulate mode, `wait_for_recovery()` returns `recovered: True` after one poll interval. You only need to implement the real-mode polling path.
 
+Execution alone is not enough — an APO agent must confirm that the action achieved the intended outcome. A rolling restart is not guaranteed to fix every kind of degradation; if the root cause is a database bottleneck or a misconfigured environment variable, the pods will restart clean and then degrade again within minutes. The verification loop catches this case by polling P90 latency at short intervals and comparing against the pre-action baseline. 
+
+P90 (the 90th-percentile latency) is a better verification signal than the mean because it is less sensitive to outliers and more representative of what real users experience. The 1.5× threshold gives the action credit for partial improvement — if baseline P90 was 200ms and the action brings it to 280ms, that is an improvement worth calling a success even if it is not back to baseline. The 120-second timeout is tight enough to fit inside a typical incident SLO and long enough for Kubernetes to complete a rolling restart and for Prometheus to scrape the new metrics.
+
 ---
 
 ## ✏️ Step 5 — Implement `AuditLogger.append()`
@@ -154,6 +166,10 @@ python autonomous_agent_starter.py --simulate --dry-run
 > [!TIP]
 > **PROVIDED** — `_build_record()` and `_write_audit()` helpers that assemble the full audit dict are already written. Your `append()` just writes what it receives.
 
+Every autonomous decision — including no-ops, blocked proposals, and failed verifications — produces an audit record. JSONL format appends one JSON object per line, making the log crash-safe (a process kill mid-write corrupts at most the current line) and directly parseable by both humans and downstream tools. Each record captures the full context: what the agent saw, what it decided, what it executed, and whether it worked.
+
+These records serve three distinct audiences: an on-call engineer pulling the postmortem, a compliance team auditing autonomous actions, and a future ML model training on `{metrics, action, outcome}` examples. JSONL is ideal for all three because it is human-readable with no special tooling, appendable without locking, and directly loadable by pandas or any log pipeline.
+
 ---
 
 ## 🔵 Step 6 — Run the full loop
@@ -167,7 +183,7 @@ python3 autonomous_agent_starter.py --simulate
 # Against live cluster (requires Lab 1 cluster running and port-forwards open)
 python3 autonomous_agent_starter.py
 
-# Inject a fault first, then run
+# Inject a fault first, then run to see the agent detect and remediate a real degradation
 curl -X POST http://localhost:8080/toggle_fault
 python3 autonomous_agent_starter.py
 ```
@@ -184,6 +200,8 @@ python autonomous_agent_starter.py
 ---
 
 ## 🔵 Step 7 — Inspect the audit log
+
+Each run writes one JSON line. The queries below extract the fields most useful for reviewing agent behavior and tracking MTTR (mean time to recovery).
 
 **macOS / Linux:**
 
@@ -225,7 +243,7 @@ python -c "import json; [print(r['run_id'], r['outcome']) for r in [json.loads(l
 
 ## Advanced: blast-radius gate test
 
-Edit the `ActionProposal` in `run()` to set `blast_radius_fraction=0.15` and re-run with `--dry-run`. Confirm the gate blocks before the executor runs.
+Edit the `ActionProposal` in `run()` to set `blast_radius_fraction=0.15` and re-run with `--dry-run`. Confirm the gate blocks before the executor runs. This tests that the gate layer correctly rejects a proposal that is over the threshold, even when the confidence score is high.
 
 ---
 

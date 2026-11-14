@@ -35,10 +35,11 @@ incident trigger
 ```
 
 **Key design principles:**
-- Agents run **concurrently** (asyncio fan-out), not sequentially
-- Each agent has a 50 ms timeout — a slow agent never blocks the system
-- Arbitration is **deterministic** (5 rules, no ML)
-- ActionAgent re-evaluates gates before every execution
+
+- Agents run **concurrently** (asyncio fan-out), not sequentially — total wall-clock time is determined by the slowest agent, not the sum of all agents. For two agents each taking 50ms, concurrent execution takes 50ms; sequential execution takes 100ms. At the scale of a production orchestrator making decisions every few seconds, this difference compounds into meaningful SLO headroom.
+- Each agent has a **50ms timeout** — if MetricsAgent or LogsAgent takes longer than 50ms to respond, the orchestrator does not wait. It marks that agent as timed out, applies the timeout penalty in arbitration, and proceeds with whatever other agents returned. A slow metrics backend should not cause the orchestrator to miss its own latency budget.
+- Arbitration is **deterministic** — the same inputs always produce the same output. This makes the system auditable: you can replay any incident from its audit log and reproduce exactly why the agent chose the action it did. No ML model, no randomness.
+- ActionAgent **re-evaluates gates before every execution** — the confidence score and gate checks in Lab 1 and Lab 2 run again, so the arbitration result alone is not sufficient to execute an action.
 
 ---
 
@@ -115,6 +116,10 @@ python lab2\autonomous_agent_starter.py --simulate
 > [!TIP]
 > **PROVIDED** — `MetricsAgent.WEIGHT = 1.5`, `SIMULATED_METRICS_FINDING`, and all Lab 1 imports are already at the top of the file.
 
+MetricsAgent queries Prometheus for the same RED metrics the Lab 1 agent used, but here it is one of several concurrent agents rather than the sole source of truth. Its weight of 1.5 reflects that quantitative time-series metrics — rates, latencies, error counts, memory ratios — are typically higher-fidelity evidence than log pattern matches. These signals are numeric, aggregated over time windows, and immune to log format changes or missing log lines. When MetricsAgent returns a strong signal and LogsAgent agrees, the arbitrator amplifies both; when only MetricsAgent returns a strong signal, its weight still pulls the consensus decisively.
+
+`run_in_executor` is necessary because `MetricsReader.read()` uses the synchronous `requests` library to query Prometheus. Calling a blocking function directly inside an async function would freeze the event loop and negate the benefit of concurrent fan-out. Running it in an executor offloads the blocking call to a thread pool, keeping the event loop free to manage the other agents' coroutines.
+
 ---
 
 ## ✏️ Step 2 — Implement `LogsAgent.diagnose()`
@@ -139,6 +144,8 @@ python lab2\autonomous_agent_starter.py --simulate
 
 > [!TIP]
 > **PROVIDED** — `LogsAgent.WEIGHT = 1.2`, `LOG_PATTERNS`, and `SIMULATED_LOGS_FINDING` are already in the starter file.
+
+LogsAgent brings a complementary evidence channel to MetricsAgent. Metrics tell you that something is wrong — latency is elevated, error rate is rising. Logs often tell you why — a specific exception, a timeout message, a pattern in the error strings that points to the root cause. When both agents independently reach the same symptom class from different data sources (quantitative time series vs. unstructured text), the corroboration bonus in Step 3 increases the arbitrator's confidence in that diagnosis. When they disagree, the contradiction penalty reduces it, forcing the orchestrator to weight the conflict explicitly rather than silently picking one.
 
 Smoke-test your two agents:
 
@@ -194,6 +201,13 @@ python orchestrator_starter.py --simulate
 > [!TIP]
 > **PROVIDED** — `AGENT_WEIGHTS` dict and `ACTION_MAP` (symptom class → action_id) are already defined in the starter.
 
+The arbitration rules encode the trust relationships between agents and the safety posture of the system:
+
+- **Contradiction penalty** acknowledges that conflicting signals mean the system state is uncertain. It does not block action — it reduces confidence, which may trigger the autonomy threshold and escalate to a human instead of executing blindly on ambiguous data.
+- **Corroboration bonus** rewards convergent evidence. Two independent data sources agreeing on the same diagnosis is stronger evidence than either source alone, so the bonus reflects genuine information gain.
+- **Cascade override for DEPLOYMENT_REGRESSION** short-circuits the normal weighted consensus. A recent deployment causing regression is a time-sensitive incident where the correct action — rollback — is known with high confidence. Waiting for weighted consensus when one agent already has 0.80+ confidence in DEPLOYMENT_REGRESSION could waste the critical window before user impact scales.
+- **Weighted consensus** ensures that more reliable agents have more influence over the final decision, while still incorporating all available evidence.
+
 ---
 
 ## ✏️ Step 4 — Implement `Orchestrator.run()`
@@ -220,6 +234,12 @@ python orchestrator_starter.py --simulate
 
 > [!TIP]
 > **PROVIDED** — `Orchestrator.FAN_OUT_TIMEOUT_S = 0.050` (50 ms), the fully wired `ActionAgent`, and the `main()` entry point are all in the starter.
+
+`asyncio.gather` runs all specialist agents concurrently and waits for all of them to finish, up to the timeout. `asyncio.wait_for` applies a per-agent timeout: if MetricsAgent takes longer than 50ms, the orchestrator does not wait — it marks that agent as timed out and continues with whatever other agents returned. This design is intentional.
+
+A production orchestrator has its own latency budget. If it must respond to an incident within 200ms, and two agents each have a 50ms budget, then gather + arbitration + action must all fit in that window. Unbounded waits for a slow agent break that budget. The 50ms timeout is chosen to be tight enough to fit inside a 100ms orchestration deadline with room for arbitration and execution latency, while being generous enough that a healthy agent (simulated at 30–50ms) always finishes in time.
+
+The `safe()` wrapper catches the timeout, returns a valid but zero-confidence `AgentFinding` with `timed_out=True`, and lets the arbitration rules handle it cleanly. This is safer than letting `TimeoutError` propagate, which would abort the entire orchestration run rather than just penalizing the slow agent.
 
 ---
 
@@ -251,11 +271,11 @@ Action: EXECUTED (total wall time ~90ms)
 
 ## 🔵 Step 6 — Test arbitration edge cases
 
-**Contradiction test:** Temporarily edit `SIMULATED_LOGS_FINDING` to set `symptom_class="DB_BOTTLENECK"`. Rerun — the contradiction penalty should fire and reduce both agents' confidence.
+**Contradiction test:** Temporarily edit `SIMULATED_LOGS_FINDING` to set `symptom_class="DB_BOTTLENECK"`. Rerun — the contradiction penalty should fire and reduce both agents' confidence. Notice how the final confidence score drops compared to the corroboration case, and check whether the reduced confidence changes the autonomy decision (execute vs. escalate).
 
-**Cascade override test:** Set `SIMULATED_METRICS_FINDING` to `symptom_class="DEPLOYMENT_REGRESSION"` and `confidence=0.85`. Verify the cascade override returns `config.rollback` regardless of the logs agent.
+**Cascade override test:** Set `SIMULATED_METRICS_FINDING` to `symptom_class="DEPLOYMENT_REGRESSION"` and `confidence=0.85`. Verify the cascade override returns `config.rollback` regardless of the logs agent's finding. This confirms that the rollback rule short-circuits weighted consensus when it fires.
 
-**Timeout test:** Temporarily add `await asyncio.sleep(0.1)` inside `MetricsAgent.diagnose()`. Verify the agent returns `timed_out=True` and the timeout penalty fires.
+**Timeout test:** Temporarily add `await asyncio.sleep(0.1)` inside `MetricsAgent.diagnose()`. Verify the agent returns `timed_out=True` and the timeout penalty fires in `rules_applied`. Notice that the pipeline still completes on time using only the logs agent's finding.
 
 ---
 
@@ -276,15 +296,15 @@ Action: EXECUTED (total wall time ~90ms)
 
 ## Advanced Exercises
 
-**A. Circuit breaker:** Add a `CircuitBreaker` class that blocks an agent if it has timed out more than 3 times in the last 5 minutes.
+**A. Circuit breaker:** Add a `CircuitBreaker` class that blocks an agent if it has timed out more than 3 times in the last 5 minutes. This models production behaviour where a consistently slow or failing agent should be excluded from future fan-outs until it recovers.
 
-**B. EventAgent:** Add an `EventAgent` (weight 1.0) that queries `kubectl get events` for `Warning` events and includes it in the fan-out.
+**B. EventAgent:** Add an `EventAgent` (weight 1.0) that queries `kubectl get events` for `Warning` events and includes it in the fan-out. Kubernetes events are a third independent evidence channel that often surfaces problems — OOMKilled, BackOff, Unhealthy — before they appear in metrics.
 
-**C. Loki audit stream:** Replace the JSONL file logger from Lab 2 with an async HTTP push to `http://localhost:3100/loki/api/v1/push`.
+**C. Loki audit stream:** Replace the JSONL file logger from Lab 2 with an async HTTP push to `http://localhost:3100/loki/api/v1/push`. This models a production audit pipeline where records are queryable via LogQL and join with the Prometheus metrics in Grafana.
 
-**D. Grafana dashboard:** Create `grafana_dashboard.json` with panels for confidence score over time, gate rejection rate, agent timeout rate, and MTTR histogram.
+**D. Grafana dashboard:** Create `grafana_dashboard.json` with panels for confidence score over time, gate rejection rate, agent timeout rate, and MTTR histogram. Use the JSONL audit file as the data source via a Loki datasource or a Prometheus pushgateway.
 
-**E. Training dataset:** After each `RECOVERED` outcome, write a record to `training_data.jsonl`: `{metrics, symptom_class, action_id, outcome, mttr_seconds}`.
+**E. Training dataset:** After each `RECOVERED` outcome, write a record to `training_data.jsonl`: `{metrics, symptom_class, action_id, outcome, mttr_seconds}`. This is the seed dataset for a future ML model that could learn which actions work best for which symptom signatures in your environment.
 
 ---
 
