@@ -63,10 +63,20 @@ incident trigger
 
 All previous lab code working:
 
+**macOS / Linux:**
+
 ```bash
-python lab1/gate_starter.py --simulate              # 4/4 passed
-python lab1/diagnostic_agent_starter.py --simulate  # DECISION: Execute
-python lab2/autonomous_agent_starter.py --simulate  # Recovered in Ns
+python3 lab1/gate_starter.py --simulate              # 4/4 passed
+python3 lab1/diagnostic_agent_starter.py --simulate  # DECISION: Execute
+python3 lab2/autonomous_agent_starter.py --simulate  # Recovered in Ns
+```
+
+**Windows:**
+
+```cmd
+python lab1\gate_starter.py --simulate
+python lab1\diagnostic_agent_starter.py --simulate
+python lab2\autonomous_agent_starter.py --simulate
 ```
 
 ---
@@ -103,7 +113,7 @@ python lab2/autonomous_agent_starter.py --simulate  # Recovered in Ns
 > ```
 
 > [!TIP]
-> **PROVIDED** — `MetricsAgent.WEIGHT = 1.5`, `SIMULATED_METRICS_FINDING`, and all Lab 1 imports (`PrometheusClient`, `MetricsReader`, `ConfidenceScorer`, `detect_symptom_class`) are already at the top of the file.
+> **PROVIDED** — `MetricsAgent.WEIGHT = 1.5`, `SIMULATED_METRICS_FINDING`, and all Lab 1 imports are already at the top of the file.
 
 ---
 
@@ -115,7 +125,7 @@ python lab2/autonomous_agent_starter.py --simulate  # Recovered in Ns
 > **Simulate mode:** `await asyncio.sleep(0.05)`, return `SIMULATED_LOGS_FINDING`.
 >
 > **Real mode:**
-> 1. Run `kubectl logs deployment/{deployment} -n {namespace} --since=10m` in an executor
+> 1. Run `kubectl logs deployment/{deployment} -n {namespace} --since=10m` via subprocess in an executor
 > 2. Count occurrences of each `LOG_PATTERNS` entry in the output
 > 3. Map the most-frequent pattern to a symptom class
 > 4. Set confidence by occurrence count:
@@ -130,13 +140,19 @@ python lab2/autonomous_agent_starter.py --simulate  # Recovered in Ns
 > [!TIP]
 > **PROVIDED** — `LogsAgent.WEIGHT = 1.2`, `LOG_PATTERNS`, and `SIMULATED_LOGS_FINDING` are already in the starter file.
 
-Smoke-test your two agents before moving on:
+Smoke-test your two agents:
+
+**macOS / Linux:**
 
 ```bash
-# Temporarily add a main() that just runs both diagnose() calls and print the findings
-# or run the full pipeline — Orchestrator.run() will raise NotImplementedError, which is fine
-python orchestrator_starter.py --simulate
+python3 orchestrator_starter.py --simulate
 # Expected: NotImplementedError: Implement arbitrate() — that means your agents ran
+```
+
+**Windows:**
+
+```cmd
+python orchestrator_starter.py --simulate
 ```
 
 ---
@@ -146,7 +162,7 @@ python orchestrator_starter.py --simulate
 # 🏠 TAKE-HOME — 25 minutes
 
 > [!NOTE]
-> **Take-home goal:** Implement the arbitration engine and the fan-out orchestrator. This is where multiple agents' potentially conflicting views get resolved into a single, defensible decision — the most intellectually interesting part of the lab.
+> **Take-home goal:** Implement the arbitration engine and the fan-out orchestrator.
 
 ---
 
@@ -209,7 +225,15 @@ python orchestrator_starter.py --simulate
 
 ## 🔵 Step 5 — Run the full pipeline
 
+**macOS / Linux:**
+
 ```bash
+python3 orchestrator_starter.py --simulate
+```
+
+**Windows:**
+
+```cmd
 python orchestrator_starter.py --simulate
 ```
 
@@ -242,7 +266,7 @@ Action: EXECUTED (total wall time ~90ms)
 - [ ] Running the starter raises `NotImplementedError: Implement arbitrate()` — not an import error
 
 **Take-home:**
-- [ ] `python orchestrator_starter.py --simulate` outputs both agents' findings and runs in < 200 ms
+- [ ] Full pipeline runs in simulate mode in < 200 ms
 - [ ] Corroboration bonus appears in `rules_applied` when both agents agree
 - [ ] Contradiction penalty appears when agents disagree
 - [ ] Cascade override fires for `DEPLOYMENT_REGRESSION` + C ≥ 0.80
@@ -254,13 +278,13 @@ Action: EXECUTED (total wall time ~90ms)
 
 **A. Circuit breaker:** Add a `CircuitBreaker` class that blocks an agent if it has timed out more than 3 times in the last 5 minutes.
 
-**B. EventAgent:** Add an `EventAgent` (weight 1.0) that queries `kubectl get events` for `Warning` events. Include it in the fan-out and weighted consensus.
+**B. EventAgent:** Add an `EventAgent` (weight 1.0) that queries `kubectl get events` for `Warning` events and includes it in the fan-out.
 
-**C. Loki audit stream:** Replace the JSONL file logger from Lab 2 with an async HTTP push to `http://localhost:3100/loki/api/v1/push` via `httpx.AsyncClient`.
+**C. Loki audit stream:** Replace the JSONL file logger from Lab 2 with an async HTTP push to `http://localhost:3100/loki/api/v1/push`.
 
-**D. Grafana dashboard:** Create `grafana_dashboard.json` with panels for: confidence score over time, gate rejection rate, agent timeout rate, MTTR histogram.
+**D. Grafana dashboard:** Create `grafana_dashboard.json` with panels for confidence score over time, gate rejection rate, agent timeout rate, and MTTR histogram.
 
-**E. Training dataset:** After each `RECOVERED` outcome, write a record to `training_data.jsonl`: `{metrics, symptom_class, action_id, outcome, mttr_seconds}` for future model fine-tuning.
+**E. Training dataset:** After each `RECOVERED` outcome, write a record to `training_data.jsonl`: `{metrics, symptom_class, action_id, outcome, mttr_seconds}`.
 
 ---
 

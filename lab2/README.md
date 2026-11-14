@@ -60,9 +60,13 @@ with open(path) as f:
 return {a["action_id"]: a for a in raw["actions"]}
 ```
 
+Install pyyaml if needed:
+
 ```bash
-pip install pyyaml   # if not already installed
+pip3 install pyyaml
 ```
+
+> **Windows:** use `pip install pyyaml`
 
 ---
 
@@ -82,11 +86,17 @@ pip install pyyaml   # if not already installed
 > [!TIP]
 > **PROVIDED** — `simulate` and `dry_run` flags are wired into the starter. In simulate mode the executor returns a canned success dict without calling kubectl.
 
-Verify in dry-run mode (no cluster needed):
+**macOS / Linux:**
 
 ```bash
-python autonomous_agent_starter.py --simulate --dry-run
+python3 autonomous_agent_starter.py --simulate --dry-run
 # Expected: ✅  [DRY RUN] Executed pod.rolling_restart
+```
+
+**Windows:**
+
+```cmd
+python autonomous_agent_starter.py --simulate --dry-run
 ```
 
 ---
@@ -96,7 +106,7 @@ python autonomous_agent_starter.py --simulate --dry-run
 # 🏠 TAKE-HOME — 25 minutes
 
 > [!NOTE]
-> **Take-home goal:** Complete the closed loop — add verification that the action actually worked, and audit logging so every decision is traceable. This is what turns a script into a production-grade autonomous agent.
+> **Take-home goal:** Complete the closed loop — add verification that the action actually worked, and audit logging so every decision is traceable.
 
 ---
 
@@ -142,22 +152,32 @@ python autonomous_agent_starter.py --simulate --dry-run
 > ```
 
 > [!TIP]
-> **PROVIDED** — `_build_record()` and `_write_audit()` helpers that assemble the full audit dict (telemetry → diagnosis → confidence → gate decision → execution → verification → outcome) are already written. Your `append()` just writes what it receives.
+> **PROVIDED** — `_build_record()` and `_write_audit()` helpers that assemble the full audit dict are already written. Your `append()` just writes what it receives.
 
 ---
 
 ## 🔵 Step 6 — Run the full loop
 
+**macOS / Linux:**
+
 ```bash
-# Full simulate mode
+# Simulate mode — no cluster needed
+python3 autonomous_agent_starter.py --simulate
+
+# Against live cluster (requires Lab 1 cluster running and port-forwards open)
+python3 autonomous_agent_starter.py
+
+# Inject a fault first, then run
+curl -X POST http://localhost:8080/toggle_fault
+python3 autonomous_agent_starter.py
+```
+
+**Windows (PowerShell):**
+
+```powershell
 python autonomous_agent_starter.py --simulate
 
-# Against live cluster (requires Lab 1 cluster running)
-kubectl port-forward -n monitoring svc/prometheus 9090:9090 &
-python autonomous_agent_starter.py
-
-# Inject a fault first
-curl -X POST http://localhost:8080/toggle_fault
+Invoke-WebRequest -Method POST http://localhost:8080/toggle_fault
 python autonomous_agent_starter.py
 ```
 
@@ -165,18 +185,26 @@ python autonomous_agent_starter.py
 
 ## 🔵 Step 7 — Inspect the audit log
 
-```bash
-cat apo_audit.jsonl | python -m json.tool   # pretty-print last entry
+**macOS / Linux:**
 
-# Summarize all runs
-cat apo_audit.jsonl | python3 -c "
+```bash
+cat apo_audit.jsonl | python3 -m json.tool
+
+python3 -c "
 import json, sys
-for line in sys.stdin:
+for line in open('apo_audit.jsonl'):
     r = json.loads(line)
-    print(r['run_id'], r['outcome'],
-          'MTTR=', r['verification']['elapsed_seconds']
-          if r.get('verification') else 'n/a')
+    v = r.get('verification') or {}
+    print(r['run_id'], r['outcome'], 'MTTR=', v.get('elapsed_seconds','n/a'))
 "
+```
+
+**Windows:**
+
+```cmd
+type apo_audit.jsonl | python -m json.tool
+
+python -c "import json; [print(r['run_id'], r['outcome']) for r in [json.loads(l) for l in open('apo_audit.jsonl')]]"
 ```
 
 ---
@@ -184,12 +212,11 @@ for line in sys.stdin:
 ## Success Criteria
 
 **In-class:**
-- [ ] `python autonomous_agent_starter.py --simulate --dry-run` completes without errors
-- [ ] Output shows `[DRY RUN] Executed pod.rolling_restart`
+- [ ] `--simulate --dry-run` completes without errors and shows `[DRY RUN] Executed pod.rolling_restart`
 - [ ] Gate blocks a 15% blast-radius proposal before the executor runs
 
 **Take-home:**
-- [ ] `python autonomous_agent_starter.py --simulate` completes with `✅  Recovered in <N>s`
+- [ ] `--simulate` completes with `✅  Recovered in <N>s`
 - [ ] `apo_audit.jsonl` contains a valid JSONL record with all fields
 - [ ] MTTR < 120 seconds in simulate mode
 - [ ] `--dry-run` skips kubectl but still writes an audit record

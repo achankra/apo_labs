@@ -23,37 +23,71 @@ Each lab has a **simulate mode** (`--simulate`) that requires no cluster, no Pro
 
 ### Required (all modes)
 
-| Tool | Min version | Install |
-|---|---|---|
-| Python | 3.11+ | python.org |
-| Git | any | git-scm.com |
+| Tool | Min version | macOS | Linux | Windows |
+|---|---|---|---|---|
+| Python | 3.11+ | [python.org](https://python.org) | `sudo apt install python3` | [python.org](https://python.org) |
+| Git | any | [git-scm.com](https://git-scm.com) | `sudo apt install git` | [git-scm.com](https://git-scm.com) |
 
 ### Required for real-cluster mode
 
 > **Do this before the workshop.** Cluster setup takes 10–15 minutes on a fresh machine.
 
-#### 1. Container runtime — Colima (macOS, recommended) or Docker Desktop
+#### 1. Container runtime
 
-**Colima** is lighter than Docker Desktop and avoids the license requirement:
+**macOS** — Colima (lighter, no license requirement):
 
 ```bash
 brew install colima docker docker-compose
 colima start --cpu 4 --memory 8 --disk 60
 ```
 
-> If you use **Docker Desktop** instead, allocate at least 8 GB RAM and 4 CPUs in Preferences → Resources.
+**macOS** — Or Docker Desktop: download from [docker.com](https://docker.com) and allocate 8 GB RAM / 4 CPUs in Preferences → Resources.
 
-Verify the daemon is reachable:
+**Linux**:
 
 ```bash
-docker info   # must succeed before proceeding
+sudo apt-get update
+sudo apt-get install -y docker.io docker-compose
+sudo systemctl start docker
+sudo usermod -aG docker $USER   # then log out and back in
+```
+
+**Windows**: Download [Docker Desktop for Windows](https://docker.com) and enable WSL 2 integration in Settings → Resources → WSL Integration.
+
+Verify on all platforms:
+
+```bash
+docker info
 ```
 
 #### 2. k3d and kubectl
 
+**macOS**:
+
 ```bash
 brew install k3d kubectl
-k3d version   # expect: k3d version v5.x.x
+```
+
+**Linux**:
+
+```bash
+curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+curl -LO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+```
+
+**Windows** (run in PowerShell as Administrator):
+
+```powershell
+winget install Rancher.k3d
+winget install Kubernetes.kubectl
+```
+
+Verify:
+
+```bash
+k3d version
+kubectl version --client
 ```
 
 ---
@@ -61,33 +95,55 @@ k3d version   # expect: k3d version v5.x.x
 ## Fork & clone
 
 1. Fork on GitHub: **github.com/achankra/apo_labs → Fork → Create fork**
-2. Clone your fork:
+2. Clone your fork and install dependencies:
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/apo_labs.git
 cd apo_labs
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
+
+> **Windows:** use `pip` instead of `pip3` if `pip3` is not on your PATH.
 
 ---
 
-## Verify setup (simulate mode — no cluster needed)
+## ✅ Workshop Readiness Checkpoint
+
+Run these before the workshop. If all four pass, you are ready.
+
+**macOS / Linux:**
 
 ```bash
-python lab1/gate_starter.py --simulate              # expect: 4 TODO gates defined
-python lab1/diagnostic_agent_starter.py --simulate  # expect: ✅ DECISION: Execute
-python lab2/autonomous_agent_starter.py --simulate  # expect: ✅ Recovered
-python lab3/orchestrator_starter.py --simulate      # expect: Action: EXECUTED
+python3 lab1/gate_starter.py --simulate              # expect: 4 TODO gates defined
+python3 lab1/diagnostic_agent_starter.py --simulate  # expect: ✅ DECISION: Execute
+python3 lab2/autonomous_agent_starter.py --simulate  # expect: ✅ Recovered
+python3 lab3/orchestrator_starter.py --simulate      # expect: Action: EXECUTED
 ```
+
+**Windows:**
+
+```cmd
+python lab1\gate_starter.py --simulate
+python lab1\diagnostic_agent_starter.py --simulate
+python lab2\autonomous_agent_starter.py --simulate
+python lab3\orchestrator_starter.py --simulate
+```
+
+All four passing with no errors = ready. Email ajay@platformetrics.com if any step fails.
 
 ---
 
 ## Cluster setup (real mode)
 
-```bash
-# Start Colima if not already running
-colima start
+**macOS** — start Colima first if not already running:
 
+```bash
+colima start
+```
+
+All platforms:
+
+```bash
 # Create the lab cluster
 k3d cluster create apo-lab --agents 2
 kubectl get nodes   # 1 server + 2 agents → all Ready
@@ -105,10 +161,16 @@ kubectl create configmap prometheus-config \
   --from-file=prometheus.yml=lab1/prometheus-config.yaml \
   -n monitoring
 kubectl apply -f lab1/prometheus-config.yaml
+```
 
-# Port-forwards — keep these running in separate terminals
-kubectl port-forward svc/payment-service 8080:80 &
-kubectl port-forward -n monitoring svc/prometheus 9090:9090 &
+Port-forwards — run each in a **separate terminal window**:
+
+```bash
+kubectl port-forward svc/payment-service 8080:80
+```
+
+```bash
+kubectl port-forward -n monitoring svc/prometheus 9090:9090
 ```
 
 ---
@@ -162,7 +224,12 @@ apo_labs/
 
 ```bash
 k3d cluster delete apo-lab
-colima stop          # optional — stops the VM but keeps the install
+```
+
+**macOS** (Colima):
+
+```bash
+colima stop
 ```
 
 ---

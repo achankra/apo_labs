@@ -1,7 +1,7 @@
 # Lab 1 — Your First Confidence Gate
 
 **Duration:** 45 minutes total · 20 min in-class · 25 min take-home  
-**Repo:** `github.com/platformetrics/apo-003-labs`  
+**Repo:** `github.com/achankra/apo_labs`  
 **Goal:** Deploy payment-service to k3d, instrument it with Prometheus RED metrics, implement four safety gates, and wire a diagnostic agent that scores confidence and decides whether to act autonomously.
 
 ---
@@ -18,15 +18,29 @@
 
 ## Prerequisites
 
-| Tool | Min version | Install |
-|---|---|---|
-| Docker Desktop | 4.x (8 GB RAM, 4 CPUs) | docker.com |
-| k3d | 5.x | `brew install k3d` or k3d.io |
-| kubectl | 1.27+ | bundled with Docker Desktop |
-| Python | 3.11+ | python.org |
+| Tool | Min version | macOS | Linux | Windows |
+|---|---|---|---|---|
+| Docker | 24+ | Colima or Docker Desktop | `sudo apt install docker.io` | Docker Desktop |
+| k3d | 5.x | `brew install k3d` | see root README | `winget install Rancher.k3d` |
+| kubectl | 1.27+ | `brew install kubectl` | see root README | `winget install Kubernetes.kubectl` |
+| Python | 3.11+ | [python.org](https://python.org) | `sudo apt install python3` | [python.org](https://python.org) |
+
+Verify everything is in place:
 
 ```bash
-docker version && k3d version && kubectl version --client && python3 --version
+docker info && k3d version && kubectl version --client
+```
+
+**macOS / Linux:**
+
+```bash
+python3 --version
+```
+
+**Windows:**
+
+```cmd
+python --version
 ```
 
 ---
@@ -61,11 +75,22 @@ k3d image import payment-service:lab -c apo-lab
 kubectl apply -f deployment.yaml
 kubectl rollout status deployment/payment-service
 kubectl get pods   # expect: 2/2 Running
-
-kubectl port-forward svc/payment-service 8080:80 &
-curl http://localhost:8080/health     # {"status":"healthy"}
-curl http://localhost:8080/metrics    # Prometheus text format
 ```
+
+Run port-forward in a **separate terminal window**:
+
+```bash
+kubectl port-forward svc/payment-service 8080:80
+```
+
+Verify:
+
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/metrics
+```
+
+> **Windows:** `curl` is available in PowerShell 7+ and Windows 10 1803+. If not present, open the URLs in a browser instead.
 
 ---
 
@@ -81,10 +106,15 @@ kubectl create configmap prometheus-config \
   -n monitoring
 kubectl apply -f ../prometheus-config.yaml
 kubectl rollout status deployment/prometheus -n monitoring
-
-kubectl port-forward -n monitoring svc/prometheus 9090:9090 &
-# Open http://localhost:9090/targets — payment-service should appear as UP
 ```
+
+Run port-forward in a **separate terminal window**:
+
+```bash
+kubectl port-forward -n monitoring svc/prometheus 9090:9090
+```
+
+Open [http://localhost:9090/targets](http://localhost:9090/targets) — payment-service should appear as **UP**.
 
 ---
 
@@ -112,9 +142,17 @@ Lab thresholds:
 | Reversal time | 600 s | 300 s |
 | Peak hours | block 09:00–17:00 UTC | same |
 
+**macOS / Linux:**
+
 ```bash
-python gate_starter.py --simulate
+python3 gate_starter.py --simulate
 # Expected: 4/4 tests passed
+```
+
+**Windows:**
+
+```cmd
+python gate_starter.py --simulate
 ```
 
 ---
@@ -162,7 +200,15 @@ Open `diagnostic_agent_starter.py`. Implement three things:
 > [!TIP]
 > **PROVIDED** — `SIMULATED_METRICS` dict, `autonomy_level()` helper, `HISTORICAL_MATCH` and `REMEDIATION_CONFIDENCE` lookup tables, and the full `run()` orchestration are already written. The `--simulate` flag bypasses Prometheus so you can test without a cluster.
 
+**macOS / Linux:**
+
 ```bash
+python3 diagnostic_agent_starter.py --simulate
+```
+
+**Windows:**
+
+```cmd
 python diagnostic_agent_starter.py --simulate
 ```
 
@@ -178,26 +224,35 @@ C (Composite):  0.84xx
 
 ## 🔵 Step 6 — Inject a fault and observe *(bonus — real cluster only)*
 
+**macOS / Linux:**
+
 ```bash
-curl -X POST http://localhost:8080/toggle_fault   # fault ON
+curl -X POST http://localhost:8080/toggle_fault
 # Wait ~30 s for Prometheus scrape, then:
-python diagnostic_agent_starter.py --prometheus-url http://localhost:9090
+python3 diagnostic_agent_starter.py --prometheus-url http://localhost:9090
 curl -X POST http://localhost:8080/toggle_fault   # fault OFF
 ```
 
-Observe that fault injection raises error metrics, increases confidence, and the agent recommends `pod.rolling_restart`.
+**Windows (PowerShell):**
+
+```powershell
+Invoke-WebRequest -Method POST http://localhost:8080/toggle_fault
+# Wait ~30 s, then:
+python diagnostic_agent_starter.py --prometheus-url http://localhost:9090
+Invoke-WebRequest -Method POST http://localhost:8080/toggle_fault
+```
 
 ---
 
 ## Success Criteria
 
 **In-class:**
-- [ ] `python gate_starter.py --simulate` reports **4/4 tests passed**
+- [ ] Gate starter reports **4/4 tests passed** in simulate mode
 - [ ] Prometheus `/targets` shows payment-service as **UP**
-- [ ] Blast radius > 10% blocks the action (gate_starter.py blast-radius test fails)
+- [ ] Blast radius > 10% blocks the action
 
 **Take-home:**
-- [ ] `python diagnostic_agent_starter.py --simulate` outputs correct symptom class and decision
+- [ ] Diagnostic agent outputs correct symptom class and decision in simulate mode
 - [ ] C score lands between 0.80 and 0.90 for the simulated MEMORY_PRESSURE scenario
 - [ ] After fault injection (real mode), the agent recommends `pod.rolling_restart`
 
