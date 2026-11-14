@@ -78,22 +78,23 @@ SIMULATED_POST_RESTART = {
 }
 
 
-# ── TODO: Load action catalog ─────────────────────────────────────────────────
+# ── PROVIDED: Load action catalog ────────────────────────────────────────────
 
 def load_action_catalog(path: str = "action_catalog.yaml") -> dict[str, dict]:
     """
     Load action_catalog.yaml and return a dict keyed by action_id.
-
-    Hint:
-        import yaml
+    PROVIDED — no changes needed.
+    """
+    if not HAS_YAML:
+        print("WARNING: pyyaml not installed — run: pip3 install pyyaml")
+        return {}
+    try:
         with open(path) as f:
             raw = yaml.safe_load(f)
         return {a["action_id"]: a for a in raw["actions"]}
-
-    Returns {} if the file cannot be read or yaml is not installed.
-    """
-    # TODO: implement this function
-    raise NotImplementedError("Implement load_action_catalog()")
+    except Exception as e:
+        print(f"WARNING: could not load {path}: {e}")
+        return {}
 
 
 # ── TODO: Implement ActionExecutor ───────────────────────────────────────────

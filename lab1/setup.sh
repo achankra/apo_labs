@@ -84,6 +84,26 @@ kubectl rollout status deployment/payment-service --timeout=120s \
     || die "payment-service rollout timed out. Run: kubectl get pods"
 success "payment-service deployed ($(kubectl get pods -l app=payment-service --no-headers | grep Running | wc -l | tr -d ' ') pods running)"
 
+# ── Pull + load Prometheus image ─────────────────────────────────────────────
+PROM_IMAGE="prom/prometheus:v2.47.0"
+info "Checking Prometheus image..."
+# Check k3d node containerd first (image may already be there from a prior run)
+if docker exec "k3d-${CLUSTER_NAME}-server-0" crictl images 2>/dev/null | grep -q "prom/prometheus.*v2.47.0"; then
+    info "Prometheus image already in k3d — skipping import"
+elif docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^prom/prometheus:v2.47.0$"; then
+    info "Prometheus image in Docker Desktop — importing into k3d..."
+    k3d image import "$PROM_IMAGE" -c "$CLUSTER_NAME" >/dev/null \
+        || die "Failed to import Prometheus image into k3d"
+    success "Prometheus image loaded"
+else
+    info "Pulling $PROM_IMAGE from Docker Hub..."
+    docker pull "$PROM_IMAGE" \
+        || die "Failed to pull $PROM_IMAGE — Docker Hub unreachable and no local cache.\n  Fix: connect to a network with Docker Hub access and rerun setup.sh."
+    k3d image import "$PROM_IMAGE" -c "$CLUSTER_NAME" >/dev/null \
+        || die "Failed to import Prometheus image into k3d"
+    success "Prometheus image loaded"
+fi
+
 # ── Deploy Prometheus ─────────────────────────────────────────────────────────
 info "Deploying Prometheus..."
 kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f - >/dev/null

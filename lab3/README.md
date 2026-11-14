@@ -80,11 +80,20 @@ incident trigger
 
 Open `orchestrator_starter.py`. Implement `MetricsAgent.diagnose(deployment, namespace)`.
 
-**Simulate mode** (required for the lab exercise):
+**Simulate mode (required):**
 1. `await asyncio.sleep(0.03)` — simulated latency
 2. Return an `AgentFinding` built from `SIMULATED_METRICS_FINDING`
 
-**Real mode** (optional — requires live cluster):
+`SIMULATED_METRICS_FINDING` is a dict already defined in the starter. Build the return value like this:
+```python
+return AgentFinding(
+    agent_name="metrics",
+    **SIMULATED_METRICS_FINDING,   # unpacks symptom_class, action_id, confidence, evidence, duration_ms
+    timed_out=False,
+)
+```
+
+**Real mode (optional — requires live cluster):**
 1. Run `MetricsReader.read()` in an executor (non-blocking)
 2. Apply `detect_symptom_class()` and `ConfidenceScorer`
 3. Return `AgentFinding(agent_name="metrics", ...)`
@@ -107,7 +116,11 @@ metrics = await loop.run_in_executor(
 
 Implement `LogsAgent.diagnose(deployment, namespace)`.
 
-**Simulate mode:** `await asyncio.sleep(0.05)`, return `SIMULATED_LOGS_FINDING`.
+**Simulate mode (required):**
+```python
+await asyncio.sleep(0.05)
+return AgentFinding(agent_name="logs", **SIMULATED_LOGS_FINDING, timed_out=False)
+```
 
 **Real mode:**
 1. Run `kubectl logs deployment/{deployment} -n {namespace} --since=10m` via subprocess in an executor
@@ -141,13 +154,15 @@ python3 orchestrator_starter.py --simulate
 
 ## Step 4 — Implement `arbitrate(findings)` ✏️
 
-Apply all 5 rules **in order**:
+Find the `arbitrate(findings)` function marked `# TODO` in the starter. Apply all 5 rules **in order**:
 
 **Rule 1 — Timeout penalty:** For each timed-out agent: `confidence -= 0.05`. Append `"timeout_penalty: {agent_name}"`.
 
-**Rule 2 — Contradiction penalty:** If MetricsAgent and LogsAgent disagree on `symptom_class`: both lose 0.15. Append `"contradiction: metrics={...} vs logs={...}"`.
+**Rule 2 — Contradiction penalty:** If MetricsAgent and LogsAgent report *different* `symptom_class` values: subtract 0.15 from each agent's confidence. Append `"contradiction: metrics={...} vs logs={...}"`.
 
-**Rule 3 — Corroboration bonus:** If MetricsAgent and LogsAgent agree: both gain 0.10 (cap at 1.0). Append `"corroboration: {symptom_class}"`.
+**Rule 3 — Corroboration bonus:** If MetricsAgent and LogsAgent report the *same* `symptom_class`: add 0.10 to each (cap at 1.0). Append `"corroboration: {symptom_class}"`.
+
+> Rules 2 and 3 are mutually exclusive — only one fires per run.
 
 **Rule 4 — Cascade override:** If ANY agent finds `DEPLOYMENT_REGRESSION` with `confidence >= 0.80`: return immediately with `action_id="config.rollback"`. Append `"cascade_override: DEPLOYMENT_REGRESSION"`.
 
@@ -167,7 +182,7 @@ The rules encode trust relationships and safety posture. Contradiction doesn't b
 
 ## Step 5 — Implement `Orchestrator.run()` ✏️
 
-Implement `Orchestrator.run(deployment, namespace)` using the fan-out pattern:
+Find `Orchestrator.run()` marked `# TODO` in the starter. Implement it using the fan-out pattern:
 
 ```python
 async def safe(coro, name):

@@ -28,7 +28,7 @@ This reuses the Lab 1 cluster. If Lab 1's cluster is not running, `setup.sh` sta
 
 | Component | Status | Timing | What it does |
 |---|---|---|---|
-| `load_action_catalog()` | ✏️ **YOUR TASK** | In-class | Reads and parses the YAML action registry |
+| `load_action_catalog()` | 🟢 **PROVIDED** | — | Reads and parses the YAML action registry |
 | `ActionExecutor.execute()` | ✏️ **YOUR TASK** | In-class | Runs `kubectl rollout restart` via subprocess |
 | `VerificationLoop.wait_for_recovery()` | ✏️ **YOUR TASK** | Take-home | Polls P90 latency until it drops to 1.5× baseline |
 | `AuditLogger.append()` | ✏️ **YOUR TASK** | Take-home | Appends a full JSONL record per run |
@@ -51,41 +51,25 @@ Open `action_catalog.yaml`. Each action specifies `risk_class`, `blast_radius_ma
 
 ---
 
-## Step 3 — Implement `load_action_catalog()` ✏️
+## Step 3 — Implement `ActionExecutor.execute()` ✏️
 
-Open `autonomous_agent_starter.py`. Implement `load_action_catalog(path)`:
+Find the `ActionExecutor` class and its `execute()` method marked `# TODO` in the starter. Implement it:
 
-1. Open the YAML file at `path`
-2. Parse with `yaml.safe_load`
-3. Return a dict keyed by `action_id`
+1. Record `start = time.monotonic()`
+2. If `self.simulate` → return a canned success dict (no kubectl). If `self.dry_run` → return a success dict with `"[DRY RUN]"` as output (no kubectl).
+3. Look up the right command:
 
 ```python
-import yaml
-with open(path) as f:
-    raw = yaml.safe_load(f)
-return {a["action_id"]: a for a in raw["actions"]}
+COMMANDS = {
+    "pod.rolling_restart": ["kubectl", "rollout", "restart", f"deployment/{deployment}", "-n", namespace],
+    "config.rollback":     ["kubectl", "rollout", "undo",    f"deployment/{deployment}", "-n", namespace],
+}
 ```
 
-`yaml.safe_load` is the secure parser variant — it cannot execute arbitrary Python embedded in the YAML.
+4. Run with `subprocess.run(cmd, capture_output=True, text=True, timeout=30)`
+5. Return a dict with these keys: `action_id`, `deployment`, `namespace`, `executed_at` (ISO-8601), `dry_run`, `simulate`, `success` (bool), `output` (stdout), `error` (stderr), `duration_ms` (int) — the docstring in the starter lists the same keys.
 
----
-
-## Step 4 — Implement `ActionExecutor.execute()` ✏️
-
-Implement `ActionExecutor.execute(action_id, deployment, namespace)`:
-
-1. Map `action_id` to a `kubectl` command
-2. Run via `subprocess.run` with a 30 s timeout
-3. Return a dict with `success`, `output`, `error`, `duration_ms`, and `dry_run`/`simulate` flags
-
-For `pod.rolling_restart`:
-```bash
-kubectl rollout restart deployment/{deployment} -n {namespace}
-```
-
-> `simulate` and `dry_run` flags are already wired — in simulate mode the executor returns a canned success dict without calling kubectl.
-
-The `dry_run` flag lets you test the full decision path in a live environment without restarting any pods — useful for validating gate logic during an incident.
+The `dry_run` flag lets you test the full decision path without restarting any pods — useful for validating gate logic during an incident.
 
 > **🤖 Claude in production:** Claude selects the execution method based on the target — a Kubernetes workload gets kubectl, a VM-based service gets an Ansible playbook, a managed cloud service gets an API call. The `ActionExecutor` abstraction maps to this.
 
@@ -104,53 +88,73 @@ python3 autonomous_agent_starter.py --simulate --dry-run
 
 ---
 
-## Step 5 — Implement `VerificationLoop.wait_for_recovery()` ✏️
+## Step 4 — Implement `VerificationLoop.wait_for_recovery()` ✏️
 
-Implement the recovery polling loop.
+Find `VerificationLoop.wait_for_recovery()` marked `# TODO` in the starter. Implement it in two parts:
 
-**Success criterion:** P90 latency drops below 1.5× the pre-action baseline within 120 seconds.
+**Part A — Simulate mode (do this first):**
+```python
+if self.simulate:
+    time.sleep(self.poll_interval)
+    p90 = SIMULATED_POST_RESTART["p99_latency_ms"]
+    threshold_ms = baseline_p90_ms * 1.5
+    return {
+        "recovered": p90 < threshold_ms,
+        "final_p90_ms": p90,
+        "threshold_ms": threshold_ms,
+        "elapsed_seconds": float(self.poll_interval),
+        "polls": 1,
+    }
+```
 
-PromQL to poll P90:
+Implementing Part A alone lets you run `--simulate` end to end immediately.
+
+**Part B — Real mode polling loop:**
+
+Success criterion: P90 latency drops below 1.5× the pre-action baseline within 120 seconds.
+
+PromQL:
 ```
 histogram_quantile(0.90,
   rate(http_request_duration_seconds_bucket{deployment="payment-service"}[1m])
 ) * 1000
 ```
 
-Polling pseudocode:
 ```python
-threshold_ms = baseline_p90 * 1.5
+threshold_ms = baseline_p90_ms * 1.5
 start = time.monotonic()
-while elapsed < timeout:
-    p90 = query_prometheus(...)
+polls, p90 = 0, threshold_ms + 1
+while time.monotonic() - start < self.timeout:
+    p90 = self.client.query("histogram_quantile(...)")  # float ms
+    polls += 1
     if p90 < threshold_ms:
-        return {"recovered": True, "elapsed_seconds": elapsed, ...}
-    time.sleep(poll_interval)
-return {"recovered": False, ...}
+        return {"recovered": True, "final_p90_ms": p90, "threshold_ms": threshold_ms,
+                "elapsed_seconds": time.monotonic() - start, "polls": polls}
+    time.sleep(self.poll_interval)
+return {"recovered": False, "final_p90_ms": p90, "threshold_ms": threshold_ms,
+        "elapsed_seconds": time.monotonic() - start, "polls": polls}
 ```
-
-> In simulate mode, `wait_for_recovery()` already returns `recovered: True` after one poll interval. Implement the real-mode polling path.
 
 > **🤖 Claude in production:** Claude would derive the 1.5× threshold dynamically from the deployment's historical p90 distribution — tight enough to catch a failed recovery, not so tight it false-positives on normal traffic jitter.
 
 ---
 
-## Step 6 — Implement `AuditLogger.append()` ✏️
+## Step 5 — Implement `AuditLogger.append()` ✏️
 
-Implement `AuditLogger.append(record)`. One JSON line per run, appended to `apo_audit.jsonl`.
+Find `AuditLogger.append()` marked `# TODO` in the starter. It receives a `record` dict already assembled by `_write_audit()` — you don't build the dict. Your implementation is two lines:
 
 ```python
 with open(self.path, "a") as f:
     f.write(json.dumps(record) + "\n")
 ```
 
-> `_build_record()` and `_write_audit()` helpers that assemble the full audit dict are already written.
+`"a"` mode appends without overwriting previous runs. `"\n"` makes each run a separate line (JSONL format).
 
 Every autonomous decision — including no-ops, blocked proposals, and failed verifications — produces an audit record. JSONL is crash-safe (a kill mid-write corrupts at most the current line), directly parseable by both humans and downstream tools, and usable as a training dataset for future models.
 
 ---
 
-## Step 7 — Run the full loop
+## Step 6 — Run the full loop
 
 ```bash
 # Simulate mode — no cluster needed
@@ -174,7 +178,7 @@ python autonomous_agent_starter.py
 
 ---
 
-## Step 8 — Inspect the audit log
+## Step 7 — Inspect the audit log
 
 ```bash
 cat apo_audit.jsonl | python3 -m json.tool
@@ -226,7 +230,7 @@ lab2/
 ├── action_catalog.yaml            🟢 PROVIDED — do not modify
 ├── setup.sh                       🟢 PROVIDED — run once at the start
 ├── teardown.sh                    🟢 PROVIDED — run when done
-├── autonomous_agent_starter.py    ✏️ IN-CLASS (Steps 3–4) + TAKE-HOME (Steps 5–6)
+├── autonomous_agent_starter.py    ✏️ IN-CLASS (Step 3) + TAKE-HOME (Steps 4–5)
 ├── solution/
 │   └── autonomous_agent.py        🟢 Reference — look after you attempt the lab
 └── README.md

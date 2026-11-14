@@ -55,6 +55,7 @@ spec:
       containers:
         - name: prometheus
           image: prom/prometheus:v2.47.0
+          imagePullPolicy: IfNotPresent
           args:
             - "--config.file=/etc/prometheus/prometheus.yml"
             - "--storage.tsdb.retention.time=1h"

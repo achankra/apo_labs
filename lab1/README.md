@@ -62,16 +62,16 @@ When `setup.sh` finishes you will see:
 
 ## Step 2 — Implement the four safety gates ✏️
 
-Open `gate_starter.py`. Implement four methods inside `GateOrchestrator`. Each returns `(bool, reason_str)`.
+Open `gate_starter.py`. Search for the four methods marked `# TODO` inside `GateOrchestrator` — they are the only stubs in the file. Each must return `(bool, reason_str)`: `True` means the gate passes, `False` means it blocks.
 
 ```
-_cost_gate(proposal)          → (bool, reason_str)
-_blast_radius_gate(proposal)  → (bool, reason_str)
-_reversibility_gate(proposal) → (bool, reason_str)
-_time_gate(proposal)          → (bool, reason_str)
+_cost_gate(proposal)          → (True/False, "reason string")
+_blast_radius_gate(proposal)  → (True/False, "reason string")
+_reversibility_gate(proposal) → (True/False, "reason string")
+_time_gate(proposal)          → (True/False, "reason string")
 ```
 
-> **PROVIDED** — `ActionProposal`, `GateResult`, `GateConfig` with lab thresholds, the `evaluate()` orchestration method, and four test cases are all written. You implement the four methods only.
+Everything else is already written: `ActionProposal` (the data you receive), `GateResult` (what `evaluate()` returns), `GateConfig` (the threshold constants you check against), the `evaluate()` method that calls your four gates in sequence, and four test cases at the bottom of the file. **Your job is the four `# TODO` methods only.**
 
 Safety gates are binary pass/fail checks that run before any action is committed. All four must pass; a single rejection blocks execution regardless of confidence score.
 
@@ -121,7 +121,7 @@ Implement the APO confidence formula: `C = 0.35×S + 0.25×H + 0.25×R + 0.15×F
 
 | Component | What it measures | Rule |
 |---|---|---|
-| S — Signal Clarity | How clearly the metric signal indicates a problem | mem > 0.90 → 0.95 · mem > 0.85 → 0.80 · mem > 0.75 → 0.60 · else 0.40 |
+| S — Signal Clarity | How clearly the metric signal indicates a problem | use `metrics["memory_usage_ratio"]` as `mem`: mem > 0.90 → 0.95 · mem > 0.85 → 0.80 · mem > 0.75 → 0.60 · else 0.40 |
 | H — Historical Match | How often this action resolved this symptom in the past | look up `(symptom_class, action_id)` in `HISTORICAL_MATCH` |
 | R — Remediation Confidence | How reliable this action is in general | look up `action_id` in `REMEDIATION_CONFIDENCE` |
 | F — Data Freshness | How recent the Prometheus scrape is | age < 30 s → 0.95 · < 60 → 0.80 · < 120 → 0.65 · else 0.40 |
@@ -138,9 +138,11 @@ The composite score drives the autonomy level:
 
 > **🤖 Claude in production:** `detect_symptom_class()` and `ConfidenceScorer` are your stand-in for a Claude API call. In production, Claude receives the raw `metrics` dict and returns `(symptom_class, action_id, confidence_score)` using reasoning over the full picture — catching compound failures (high latency AND elevated restarts AND stale scrape) that a linear rule table misses.
 
-### C. `PrometheusClient.query()` and `MetricsReader.read()` *(real mode — bonus)*
+### C. `PrometheusClient.query()` and `MetricsReader.read()` *(OPTIONAL — real cluster only)*
 
-> **PROVIDED** — `SIMULATED_METRICS`, `autonomy_level()`, `HISTORICAL_MATCH`, `REMEDIATION_CONFIDENCE`, and `run()` are written. `--simulate` bypasses Prometheus so you can test without touching the cluster.
+Skip this if you are working in simulate mode. These two methods wire the agent to live Prometheus data. Leave the stubs as-is — the starter automatically falls back to `SIMULATED_METRICS` when they raise `NotImplementedError`.
+
+> **PROVIDED** — `SIMULATED_METRICS`, `autonomy_level()`, `HISTORICAL_MATCH`, `REMEDIATION_CONFIDENCE`, and `run()` are written. `--simulate` bypasses Prometheus so you can complete the lab without touching the cluster.
 
 Test in simulate mode:
 
