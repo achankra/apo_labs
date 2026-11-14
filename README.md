@@ -169,5 +169,5 @@ colima stop          # optional — stops the VM but keeps the install
 
 ## Support
 
-Raise your hand in the workshop or post in the workshop Slack channel.  
+Questions? Email ajay@platformetrics.com.  
 Solutions are in each lab's `solution/` directory — try the lab yourself first.
