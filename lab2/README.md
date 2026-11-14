@@ -42,6 +42,9 @@
 
 > [!TIP]
 > **PROVIDED** — `action_catalog.yaml` is complete. Open it and read it; you will not modify it. Each action specifies `risk_class`, `blast_radius_max`, `reversal_time_seconds`, `required_confidence`, `max_executions_per_hour`, `cooldown_seconds`, and `symptom_classes`. This is what APO agents consult before proposing an action.
+> [!TIP]
+> **🤖 Claude in production:** Claude doesn't read a static YAML file — it queries a live action catalog service via API. When no approved action fits a novel symptom, Claude can draft a new candidate action and submit it for human review before it enters the catalog. The catalog itself is a living policy document Claude helps maintain.
+
 
 An action catalog is the boundary of what an APO agent is authorized to do. By defining approved remediation actions as data (a YAML file) rather than code, operators can tighten or expand agent authority without modifying the agent itself or deploying a new version. Each catalog entry also carries the risk metadata that the gates in Lab 1 need — blast radius, reversal time — so the gates can evaluate any proposal without understanding the action's implementation details. The catalog is also the place where `max_executions_per_hour` and `cooldown_seconds` are enforced, preventing the agent from repeatedly executing the same action if the first attempt did not resolve the issue.
 
@@ -71,6 +74,9 @@ pip3 install pyyaml
 ```
 
 > **Windows:** use `pip install pyyaml`
+> [!TIP]
+> **🤖 Claude in production:** Parsing the catalog is the easy part. Claude also validates it on load — checking that every `required_confidence` threshold is achievable given the formula weights, and that no action's `blast_radius_max` exceeds the global limit in `GateConfig`. Mismatches are surfaced as policy warnings before any agent runs.
+
 
 ---
 
@@ -106,6 +112,9 @@ python3 autonomous_agent_starter.py --simulate --dry-run
 ```cmd
 python autonomous_agent_starter.py --simulate --dry-run
 ```
+> [!TIP]
+> **🤖 Claude in production:** `kubectl rollout restart` is one of many possible execution backends. Claude would select the execution method based on the target system's capabilities — a Kubernetes workload gets kubectl, a VM-based service gets an Ansible playbook, a managed cloud service gets an API call. The `ActionExecutor` abstraction maps to this: Claude picks the right tool for the target, not always kubectl.
+
 
 ---
 
@@ -146,6 +155,9 @@ python autonomous_agent_starter.py --simulate --dry-run
 
 > [!TIP]
 > **PROVIDED** — In simulate mode, `wait_for_recovery()` returns `recovered: True` after one poll interval. You only need to implement the real-mode polling path.
+> [!TIP]
+> **🤖 Claude in production:** The 1.5× threshold and 120 s timeout are fixed constants here. Claude would derive these dynamically — using the deployment's historical p90 distribution to set a threshold that is tight enough to catch a failed recovery but not so tight it false-positives on normal traffic jitter. It would also adaptively back off the poll interval if Prometheus is under load.
+
 
 Execution alone is not enough — an APO agent must confirm that the action achieved the intended outcome. A rolling restart is not guaranteed to fix every kind of degradation; if the root cause is a database bottleneck or a misconfigured environment variable, the pods will restart clean and then degrade again within minutes. The verification loop catches this case by polling P90 latency at short intervals and comparing against the pre-action baseline. 
 
@@ -165,6 +177,9 @@ P90 (the 90th-percentile latency) is a better verification signal than the mean 
 
 > [!TIP]
 > **PROVIDED** — `_build_record()` and `_write_audit()` helpers that assemble the full audit dict are already written. Your `append()` just writes what it receives.
+> [!TIP]
+> **🤖 Claude in production:** Raw JSONL is for machines. Claude would also write a natural-language incident summary alongside each record — one sentence describing what happened, why it was blocked or executed, and what the outcome was. That summary makes the audit log searchable by an operator asking "show me all incidents where the gate blocked a rollout last week."
+
 
 Every autonomous decision — including no-ops, blocked proposals, and failed verifications — produces an audit record. JSONL format appends one JSON object per line, making the log crash-safe (a process kill mid-write corrupts at most the current line) and directly parseable by both humans and downstream tools. Each record captures the full context: what the agent saw, what it decided, what it executed, and whether it worked.
 
@@ -199,6 +214,12 @@ python autonomous_agent_starter.py
 
 ---
 
+## 🔵 Step 7
+> [!TIP]
+> **🤖 Claude in production:** You manually toggled the fault and triggered the agent here. In a live APO system, Claude watches the Prometheus alert stream and triggers the full loop automatically when an alert fires — no human initiates the run. The `--simulate` path you're running is exactly what Claude exercises during dry-run validation of a new gate configuration before it goes live.
+
+---
+
 ## 🔵 Step 7 — Inspect the audit log
 
 Each run writes one JSON line. The queries below extract the fields most useful for reviewing agent behavior and tracking MTTR (mean time to recovery).
@@ -224,6 +245,9 @@ type apo_audit.jsonl | python -m json.tool
 
 python -c "import json; [print(r['run_id'], r['outcome']) for r in [json.loads(l) for l in open('apo_audit.jsonl')]]"
 ```
+> [!TIP]
+> **🤖 Claude in production:** Claude reads the audit log across runs — not just the most recent one — to surface patterns: which gate fires most often, which actions have the highest MTTR, whether a specific deployment recurs in incidents. Those patterns feed back into gate threshold tuning and action catalog updates.
+
 
 ---
 

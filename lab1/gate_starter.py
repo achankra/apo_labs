@@ -88,62 +88,63 @@ class GateOrchestrator:
     def evaluate(self, proposal: ActionProposal) -> GateResult:
         """
         Run all four gates and return a GateResult.
-
-        Steps:
-        1. Call each gate method
-        2. Collect failures (gate name + reason string)
-        3. Return GateResult(approved=all_passed, blocked_by=[...], reasons=[...])
         """
-        # TODO: implement this method
-        raise NotImplementedError("Implement GateOrchestrator.evaluate()")
+        gates = [
+            ("cost_gate",          self._cost_gate),
+            ("blast_radius_gate",  self._blast_radius_gate),
+            ("reversibility_gate", self._reversibility_gate),
+            ("time_gate",          self._time_gate),
+        ]
+        blocked_by, reasons = [], []
+        for name, gate_fn in gates:
+            passed, reason = gate_fn(proposal)
+            if not passed:
+                blocked_by.append(name)
+                reasons.append(reason)
+        return GateResult(approved=len(blocked_by) == 0, blocked_by=blocked_by, reasons=reasons)
 
     # ── Individual gates ──────────────────────────────────────────────────────
 
     def _cost_gate(self, proposal: ActionProposal) -> tuple[bool, str]:
-        """
-        PASS if proposal.estimated_cost_per_hour_usd <= config.cost_per_hour_usd_max.
-        Return (passed: bool, reason: str).
-
-        Hint: reason string should include the actual value and the threshold.
-        Example: "cost $1200/hr exceeds limit $500/hr"
-        """
-        # TODO: implement this gate
-        raise NotImplementedError("Implement _cost_gate()")
+        limit = self.config.cost_per_hour_usd_max
+        actual = proposal.estimated_cost_per_hour_usd
+        if actual <= limit:
+            return True, ""
+        return (
+            False,
+            f"cost ${actual:.0f}/hr exceeds limit ${limit:.0f}/hr"
+        )
 
     def _blast_radius_gate(self, proposal: ActionProposal) -> tuple[bool, str]:
-        """
-        PASS if proposal.blast_radius_fraction <= config.blast_radius_max.
-        Return (passed: bool, reason: str).
-
-        Example: "blast radius 15% exceeds limit 10%"
-        """
-        # TODO: implement this gate
-        raise NotImplementedError("Implement _blast_radius_gate()")
+        limit  = self.config.blast_radius_max
+        actual = proposal.blast_radius_fraction
+        if actual <= limit:
+            return True, ""
+        return (
+            False,
+            f"blast radius {actual:.0%} exceeds limit {limit:.0%}"
+        )
 
     def _reversibility_gate(self, proposal: ActionProposal) -> tuple[bool, str]:
-        """
-        PASS if proposal.reversal_time_seconds <= config.reversal_time_sec_max.
-        Return (passed: bool, reason: str).
-
-        Example: "reversal time 900s exceeds limit 600s"
-        """
-        # TODO: implement this gate
-        raise NotImplementedError("Implement _reversibility_gate()")
+        limit  = self.config.reversal_time_sec_max
+        actual = proposal.reversal_time_seconds
+        if actual <= limit:
+            return True, ""
+        return (
+            False,
+            f"reversal time {actual}s exceeds limit {limit}s"
+        )
 
     def _time_gate(self, proposal: ActionProposal) -> tuple[bool, str]:
-        """
-        PASS if the current UTC hour is NOT within peak_hours_utc range.
-        Return (passed: bool, reason: str).
-
-        config.peak_hours_utc is a (start_hour, end_hour) tuple (exclusive end).
-        BLOCK if: start_hour <= current_utc_hour < end_hour
-
-        Example: "action blocked during peak hours (09:00–17:00 UTC)"
-
-        Tip: use datetime.now(timezone.utc).hour to get the current hour.
-        """
-        # TODO: implement this gate
-        raise NotImplementedError("Implement _time_gate()")
+        start_h, end_h = self.config.peak_hours_utc
+        current_h = datetime.now(timezone.utc).hour
+        if start_h <= current_h < end_h:
+            return (
+                False,
+                f"action blocked during peak hours "
+                f"({start_h:02d}:00\u2013{end_h:02d}:00 UTC), current hour={current_h:02d}"
+            )
+        return True, ""
 
 
 # ── Test harness ──────────────────────────────────────────────────────────────

@@ -115,6 +115,9 @@ python lab2\autonomous_agent_starter.py --simulate
 
 > [!TIP]
 > **PROVIDED** — `MetricsAgent.WEIGHT = 1.5`, `SIMULATED_METRICS_FINDING`, and all Lab 1 imports are already at the top of the file.
+> [!TIP]
+> **🤖 Claude in production:** The MetricsAgent IS a Claude LLM call in a real APO system. Rather than running `detect_symptom_class()` rules, Claude receives the raw metrics dict and returns a structured `AgentFinding` by reasoning about what the numbers mean together — high memory AND elevated restarts AND stale scrape is a different prognosis than any one of those in isolation. The rule-based path you implement here is a teachable approximation of that reasoning.
+
 
 MetricsAgent queries Prometheus for the same RED metrics the Lab 1 agent used, but here it is one of several concurrent agents rather than the sole source of truth. Its weight of 1.5 reflects that quantitative time-series metrics — rates, latencies, error counts, memory ratios — are typically higher-fidelity evidence than log pattern matches. These signals are numeric, aggregated over time windows, and immune to log format changes or missing log lines. When MetricsAgent returns a strong signal and LogsAgent agrees, the arbitrator amplifies both; when only MetricsAgent returns a strong signal, its weight still pulls the consensus decisively.
 
@@ -144,6 +147,9 @@ MetricsAgent queries Prometheus for the same RED metrics the Lab 1 agent used, b
 
 > [!TIP]
 > **PROVIDED** — `LogsAgent.WEIGHT = 1.2`, `LOG_PATTERNS`, and `SIMULATED_LOGS_FINDING` are already in the starter file.
+> [!TIP]
+> **🤖 Claude in production:** Pattern matching on `LOG_PATTERNS` strings is a brittle heuristic — it misses novel error messages and stack traces it has never seen. Claude would do semantic log analysis: given the last 10 minutes of logs, it reasons about whether the errors indicate a dependency failure, a resource exhaustion, or a code regression, without needing a pre-defined pattern list. It also correlates log timing with recent deployment events.
+
 
 LogsAgent brings a complementary evidence channel to MetricsAgent. Metrics tell you that something is wrong — latency is elevated, error rate is rising. Logs often tell you why — a specific exception, a timeout message, a pattern in the error strings that points to the root cause. When both agents independently reach the same symptom class from different data sources (quantitative time series vs. unstructured text), the corroboration bonus in Step 3 increases the arbitrator's confidence in that diagnosis. When they disagree, the contradiction penalty reduces it, forcing the orchestrator to weight the conflict explicitly rather than silently picking one.
 
@@ -200,6 +206,9 @@ python orchestrator_starter.py --simulate
 
 > [!TIP]
 > **PROVIDED** — `AGENT_WEIGHTS` dict and `ACTION_MAP` (symptom class → action_id) are already defined in the starter.
+> [!TIP]
+> **🤖 Claude in production:** The 5 deterministic rules you implement here are a teachable approximation of multi-source arbitration. In a real system, Claude is the arbitrator: when agents contradict, it doesn't just apply a penalty — it requests additional evidence (spawns a third agent, queries a deployment diff, checks recent config changes) before committing to a consensus. The cascade override for `DEPLOYMENT_REGRESSION` maps directly to Claude's reasoning: a confident regression signal always overrides because rollback risk is lower than continued degradation.
+
 
 The arbitration rules encode the trust relationships between agents and the safety posture of the system:
 
@@ -234,6 +243,9 @@ The arbitration rules encode the trust relationships between agents and the safe
 
 > [!TIP]
 > **PROVIDED** — `Orchestrator.FAN_OUT_TIMEOUT_S = 0.050` (50 ms), the fully wired `ActionAgent`, and the `main()` entry point are all in the starter.
+> [!TIP]
+> **🤖 Claude in production:** The fan-out here always spins up the same two agents (Metrics + Logs). A Claude-driven orchestrator would select which specialist agents to invoke based on the alert type — a latency spike triggers a DatabaseAgent and a DependencyAgent, while an OOM triggers a MemoryProfilerAgent and a ResourceQuotaAgent. The agent roster is dynamic, not fixed, and Claude decides it at runtime.
+
 
 `asyncio.gather` runs all specialist agents concurrently and waits for all of them to finish, up to the timeout. `asyncio.wait_for` applies a per-agent timeout: if MetricsAgent takes longer than 50ms, the orchestrator does not wait — it marks that agent as timed out and continues with whatever other agents returned. This design is intentional.
 
@@ -266,6 +278,9 @@ Arbitration rules: ['corroboration: MEMORY_PRESSURE']
 Consensus: MEMORY_PRESSURE → pod.rolling_restart  C=0.9400
 Action: EXECUTED (total wall time ~90ms)
 ```
+> [!TIP]
+> **🤖 Claude in production:** The ~90ms wall time here is two agents over asyncio. At scale, Claude orchestrates dozens of specialist agents across a service mesh — memory, latency, dependency graph, change history, SLO budget — still within a sub-second decision window. The 50 ms per-agent timeout you implemented in `safe()` is the mechanism that makes this tractable: slow agents never block the system.
+
 
 ---
 
@@ -276,6 +291,10 @@ Action: EXECUTED (total wall time ~90ms)
 **Cascade override test:** Set `SIMULATED_METRICS_FINDING` to `symptom_class="DEPLOYMENT_REGRESSION"` and `confidence=0.85`. Verify the cascade override returns `config.rollback` regardless of the logs agent's finding. This confirms that the rollback rule short-circuits weighted consensus when it fires.
 
 **Timeout test:** Temporarily add `await asyncio.sleep(0.1)` inside `MetricsAgent.diagnose()`. Verify the agent returns `timed_out=True` and the timeout penalty fires in `rules_applied`. Notice that the pipeline still completes on time using only the logs agent's finding.
+
+> [!TIP]
+> **🤖 Claude in production:** Contradiction is the most interesting case. Rather than applying a fixed 0.15 confidence penalty, Claude would spawn a tiebreaker: a third specialist agent focused specifically on the disputed dimension, or a direct query to the deployment's change log to see if a recent rollout could explain the conflicting signals. Deterministic penalty rules are the right starting point; adaptive evidence-seeking is where production systems go next.
+
 
 ---
 

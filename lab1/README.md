@@ -31,6 +31,13 @@ Verify everything is in place:
 docker info && k3d version && kubectl version --client
 ```
 
+> [!NOTE]
+> **macOS + Colima users:** Raise the inotify limits before creating the cluster, or k3s will fail to start with "too many open files":
+> ```bash
+> colima ssh -- 'sudo sysctl -w fs.inotify.max_user_watches=1048576 fs.inotify.max_user_instances=512'
+> ```
+> Run once per Colima session.
+
 **macOS / Linux:**
 
 ```bash
@@ -63,6 +70,10 @@ k3d cluster create apo-lab --agents 2
 kubectl get nodes   # expect: 1 server + 2 agents = Ready
 ```
 
+> [!TIP]
+> **🤖 Claude in production:** Cluster provisioning would be an API call to your IDP, not a manual CLI command. Claude would call the platform's self-service endpoint with the workload profile (`payment-service, 2 replicas, aarch64`) and wait for the cluster ready event — no human types `k3d cluster create`.
+
+
 ---
 
 ## 🟢 Step 2 — Build and load payment-service
@@ -74,6 +85,9 @@ The payment-service is the target system for every lab. It is a minimal FastAPI 
 
 `k3d image import` loads the locally built Docker image directly into the cluster's internal image registry, bypassing Docker Hub entirely. This is what makes the lab work offline and avoids `ImagePullBackOff` errors that happen when k3d tries to pull an image from the internet.
 
+> [!NOTE]
+> `docker build` requires Docker Hub access to pull `python:3.11-slim`. If Docker Hub is unreachable and you have a cached `payment-service:lab` from a prior run, skip the build step — verify with `docker images payment-service:lab` and go straight to `k3d image import`.
+
 ```bash
 cd lab1/payment-service
 docker build -t payment-service:lab .
@@ -82,6 +96,9 @@ kubectl apply -f deployment.yaml
 kubectl rollout status deployment/payment-service
 kubectl get pods   # expect: 2/2 Running
 ```
+
+> [!TIP]
+> **🤖 Claude in production:** Before the build, Claude would scan the Dockerfile and `app.py` for security issues and validate `deployment.yaml` against the team's golden-path template. After rollout it would query the `/health` endpoint and confirm pod readiness — only then signal "deploy succeeded" to the calling orchestrator.
 
 Run port-forward in a **separate terminal window** so it stays active:
 
@@ -114,9 +131,15 @@ kubectl create namespace monitoring
 kubectl create configmap prometheus-config \
   --from-file=prometheus.yml=../prometheus-config.yaml \
   -n monitoring
-kubectl apply -f ../prometheus-config.yaml
+# prometheus-config.yaml's first document is raw Prometheus scrape config, not a K8s resource.
+# Apply only the Deployment + Service (from the second document onward):
+sed -n '/^apiVersion:/,$p' ../prometheus-config.yaml | kubectl apply -f -
 kubectl rollout status deployment/prometheus -n monitoring
 ```
+
+> [!TIP]
+> **🤖 Claude in production:** Claude would inspect the service's existing SLOs and recent p99 latency history, then generate the Prometheus alerting rules with calibrated thresholds — rather than applying a static config. It would also verify that the scrape target appears as UP before marking the observability step done.
+
 
 Run port-forward in a **separate terminal window**:
 
@@ -158,6 +181,10 @@ Lab thresholds:
 | Blast radius | 10% of pods | 5% |
 | Reversal time | 600 s | 300 s |
 | Peak hours | block 09:00–17:00 UTC | same |
+
+> [!TIP]
+> **🤖 Claude in production:** The thresholds in `GateConfig` are hand-coded constants for the lab. In a live system, Claude would derive these from historical incident data — calculating the blast-radius limit that kept collateral impact below SLO thresholds in past remediations, and the cost ceiling that matched the team's approved budget. The gate code stays deterministic; Claude tunes the numbers that feed it.
+
 
 **macOS / Linux:**
 
@@ -243,6 +270,12 @@ C (Composite):  0.84xx
 
 ---
 
+## 🔵 Step 6
+> [!TIP]
+> **🤖 Claude in production:** The `detect_symptom_class()` rules and the `ConfidenceScorer` formula are your stand-in for an LLM call. In production, Claude receives the raw `metrics` dict and returns `(symptom_class, action_id, confidence_score)` using reasoning over the full metrics picture — catching compound failures (high latency AND elevated restarts AND stale scrape) that a linear rule table misses. The confidence weights (`0.35×S + 0.25×H …`) themselves would be learned from historical incident outcomes rather than hardcoded.
+
+---
+
 ## 🔵 Step 6 — Inject a fault and observe *(bonus — real cluster only)*
 
 `/toggle_fault` flips a flag inside the payment-service that injects artificial latency and raises the error rate. After toggling it, wait about 30 seconds for Prometheus to scrape the degraded metrics, then run the agent in real mode. You should see the agent detect the degradation, score high confidence, pass all four gates, and recommend the remediation action — the full autonomous decision loop on live data.
@@ -256,12 +289,130 @@ python3 diagnostic_agent_starter.py --prometheus-url http://localhost:9090
 curl -X POST http://localhost:8080/toggle_fault   # fault OFF
 ```
 
+> [!TIP]
+> **🤖 Claude in production:** You manually toggled the fault here. In a real APO loop, Claude watches the Prometheus alert stream. When an alert fires (`payment_service_memory_high`), it triggers the diagnostic pipeline automatically — no human action needed. After remediation it verifies the alert resolved and closes the incident ticket.
+
+
 **Windows (PowerShell):**
 
 ```powershell
 Invoke-WebRequest -Method POST http://localhost:8080/toggle_fault
 # Wait ~30 s, then:
 python diagnostic_agent_starter.py --prometheus-url http://localhost:9090
+Invoke-WebRequest -Method POST http://localhost:8080/toggle_fault
+```
+
+---
+
+---
+
+## 🔵 Step 7 — Run in real mode (live Prometheus + Claude as the diagnostic brain)
+
+This step runs the full APO pipeline against your live k3d cluster — no simulated data.
+
+### What Claude does vs what the Python code does
+
+In the APO architecture there are two distinct layers, and it matters to understand what each one does:
+
+| Layer | Who does it | What it does |
+|---|---|---|
+| **Diagnostic reasoning** | **Claude (the LLM)** | Observes raw metrics, decides what is wrong, proposes a remediation action, and estimates confidence. In `diagnostic_agent_starter.py` the student implements this logic with deterministic Python rules — but in a production APO system, this layer is an LLM call: Claude reads the metrics, reasons about the symptom pattern, and returns `(symptom_class, action_id, confidence_score)` |
+| **Safety gates** | **Python (`GateOrchestrator`)** | Enforces hard, non-negotiable thresholds — cost, blast radius, reversal time, peak hours. These are always pure code, never an LLM, because they must be deterministic and auditable |
+
+**In simulate mode** (`--simulate`): Claude's reasoning layer is replaced by `SIMULATED_METRICS` + your hardcoded rules. Good for testing the gate logic without a cluster.
+
+**In real mode** (`--prometheus-url ...`): Claude's reasoning layer reads live metrics from Prometheus. The same hardcoded rules run, but now on real signal. In a production APO agent you would replace those rules with a Claude API call that reasons over the same metrics dict.
+
+### Prerequisites
+
+Both port-forwards from Steps 2 and 3 must be running in separate terminals:
+
+```bash
+# Terminal 1 — payment-service
+kubectl port-forward svc/payment-service 8080:80
+
+# Terminal 2 — Prometheus
+kubectl port-forward -n monitoring svc/prometheus 9090:9090
+```
+
+Also install `requests` if you haven't already:
+
+```bash
+pip3 install requests
+```
+
+### Inject a fault so there is something to diagnose
+
+**macOS / Linux:**
+
+```bash
+curl -X POST http://localhost:8080/toggle_fault
+```
+
+**Windows (PowerShell):**
+
+```powershell
+Invoke-WebRequest -Method POST http://localhost:8080/toggle_fault
+```
+
+Wait ~30 seconds for Prometheus to scrape the degraded metrics.
+
+### Run the diagnostic agent against live Prometheus
+
+**macOS / Linux:**
+
+```bash
+python3 diagnostic_agent_starter.py --prometheus-url http://localhost:9090
+```
+
+**Windows:**
+
+```cmd
+python diagnostic_agent_starter.py --prometheus-url http://localhost:9090
+```
+
+**What you should see:** The agent queries Prometheus for `memory_usage_ratio`, `error_rate_ratio`, `p99_latency_ms`, `restart_count_1h`, and `last_scrape_age_seconds` — the same keys as `SIMULATED_METRICS`. It classifies the symptom, scores confidence using `C = 0.35×S + 0.25×H + 0.25×R + 0.15×F`, submits an `ActionProposal` to your gates, and prints a decision. After fault injection the expected output is:
+
+```
+Symptom class:  MEMORY_PRESSURE
+Proposed action: pod.rolling_restart
+✅  DECISION: Execute pod.rolling_restart on payment-service
+   Confidence: 0.84xx → L4 — act + notify
+```
+
+> [!NOTE]
+> `MetricsReader.read()` and `PrometheusClient.query()` are TODO stubs. Until you implement them (Step 5C), the agent falls back to `SIMULATED_METRICS` automatically — you will see `"MetricsReader.read() not yet implemented — using simulated data"` in the output. Implement those methods to get live metrics flowing.
+
+### Where Claude the LLM would replace the rules
+
+In a real APO deployment, the `detect_symptom_class()` function and `ConfidenceScorer.compute()` are replaced by a Claude API call:
+
+```python
+# Production pattern (not part of this lab):
+response = anthropic.messages.create(
+    model="claude-opus-4-5",
+    messages=[{"role": "user", "content": f"Metrics: {metrics}. Diagnose the symptom and propose an action."}],
+    tools=[symptom_classification_tool, confidence_scoring_tool],
+)
+symptom_class = response.tool_use("classify_symptom")["symptom_class"]
+confidence    = response.tool_use("score_confidence")["C"]
+```
+
+Claude reasons about the metrics holistically — catching composite failure patterns the rule table misses — and returns structured output that feeds directly into `ActionProposal`. The gate layer (`GateOrchestrator`) is unchanged: it validates Claude's proposal against the same hard thresholds regardless of how the proposal was generated.
+
+The autonomy level output tells the operator how much human oversight is required based on the confidence score Claude returned.
+
+### Turn the fault back off
+
+**macOS / Linux:**
+
+```bash
+curl -X POST http://localhost:8080/toggle_fault
+```
+
+**Windows (PowerShell):**
+
+```powershell
 Invoke-WebRequest -Method POST http://localhost:8080/toggle_fault
 ```
 
