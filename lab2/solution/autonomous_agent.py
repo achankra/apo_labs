@@ -26,7 +26,12 @@ try:
 except ImportError:
     HAS_REQUESTS = False
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "lab1" / "solution"))
+_this = Path(__file__).resolve().parent
+for _p in [_this.parent.parent / "lab1" / "solution",   # running from lab2/solution/
+            _this.parent / "lab1" / "solution"]:          # running from lab2/ (if copied)
+    if _p.exists():
+        sys.path.insert(0, str(_p))
+        break
 
 from gate import GateOrchestrator, GateConfig, ActionProposal, GateResult
 from diagnostic_agent import (
