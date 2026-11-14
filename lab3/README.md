@@ -78,7 +78,7 @@ incident trigger
 
 ## Step 2 — Implement `MetricsAgent.diagnose()` ✏️
 
-Open `orchestrator_starter.py`. Implement `MetricsAgent.diagnose(deployment, namespace)`.
+Open `orchestrator_starter.py`. Search for `# ── TODO: Implement MetricsAgent` (around line 109). Inside the `MetricsAgent` class, fill in the `diagnose()` method — replace the `raise NotImplementedError` line with your implementation.
 
 **Simulate mode (required):**
 1. `await asyncio.sleep(0.03)` — simulated latency
@@ -114,7 +114,7 @@ metrics = await loop.run_in_executor(
 
 ## Step 3 — Implement `LogsAgent.diagnose()` ✏️
 
-Open `orchestrator_starter.py`. Implement `LogsAgent.diagnose(deployment, namespace)`.
+Open `orchestrator_starter.py`. Search for `# ── TODO: Implement LogsAgent` (around line 137). Inside the `LogsAgent` class, fill in the `diagnose()` method — replace the `raise NotImplementedError` line with your implementation.
 
 **Simulate mode (required):**
 ```python
