@@ -1,0 +1,18 @@
+# APO Workshop Labs — Python dependencies
+# Install: pip install -r requirements.txt
+
+# Web framework — payment-service (lab1)
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+
+# Prometheus metrics client — payment-service (lab1)
+prometheus-client>=0.20.0
+
+# Prometheus HTTP API queries — diagnostic_agent, autonomous_agent, orchestrator
+requests>=2.31.0
+
+# Action catalog parsing (lab2)
+pyyaml>=6.0.1
+
+# Optional: async HTTP client (lab3 advanced exercise C — Loki audit stream)
+# httpx>=0.27.0
