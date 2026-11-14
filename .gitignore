@@ -19,6 +19,7 @@ ENV/
 # Audit / output logs produced by labs
 lab2/audit_log.jsonl
 lab3/audit_log.jsonl
+lab2/.lab_pids
 *.jsonl
 
 # macOS
@@ -32,6 +33,7 @@ lab3/audit_log.jsonl
 *.swp
 *.swo
 .cursor/
+
 
 # Kubernetes / k3d scratch
 kubeconfig*

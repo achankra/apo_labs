@@ -114,7 +114,7 @@ metrics = await loop.run_in_executor(
 
 ## Step 3 — Implement `LogsAgent.diagnose()` ✏️
 
-Implement `LogsAgent.diagnose(deployment, namespace)`.
+Open `orchestrator_starter.py`. Implement `LogsAgent.diagnose(deployment, namespace)`.
 
 **Simulate mode (required):**
 ```python
@@ -154,7 +154,7 @@ python3 orchestrator_starter.py --simulate
 
 ## Step 4 — Implement `arbitrate(findings)` ✏️
 
-Find the `arbitrate(findings)` function marked `# TODO` in the starter. Apply all 5 rules **in order**:
+Open `orchestrator_starter.py`. Find the `arbitrate(findings)` function marked `# TODO`. Apply all 5 rules **in order**:
 
 **Rule 1 — Timeout penalty:** For each timed-out agent: `confidence -= 0.05`. Append `"timeout_penalty: {agent_name}"`.
 
@@ -182,7 +182,7 @@ The rules encode trust relationships and safety posture. Contradiction doesn't b
 
 ## Step 5 — Implement `Orchestrator.run()` ✏️
 
-Find `Orchestrator.run()` marked `# TODO` in the starter. Implement it using the fan-out pattern:
+Open `orchestrator_starter.py`. Find `Orchestrator.run()` marked `# TODO`. Implement it using the fan-out pattern:
 
 ```python
 async def safe(coro, name):

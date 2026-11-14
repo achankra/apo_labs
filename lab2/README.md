@@ -53,7 +53,7 @@ Open `action_catalog.yaml`. Each action specifies `risk_class`, `blast_radius_ma
 
 ## Step 3 — Implement `ActionExecutor.execute()` ✏️
 
-Find the `ActionExecutor` class and its `execute()` method marked `# TODO` in the starter. Implement it:
+Open `autonomous_agent_starter.py`. Find the `ActionExecutor` class and its `execute()` method marked `# TODO`. Implement it:
 
 1. Record `start = time.monotonic()`
 2. If `self.simulate` → return a canned success dict (no kubectl). If `self.dry_run` → return a success dict with `"[DRY RUN]"` as output (no kubectl).
@@ -90,7 +90,7 @@ python3 autonomous_agent_starter.py --simulate --dry-run
 
 ## Step 4 — Implement `VerificationLoop.wait_for_recovery()` ✏️
 
-Find `VerificationLoop.wait_for_recovery()` marked `# TODO` in the starter. Implement it in two parts:
+Open `autonomous_agent_starter.py`. Find `VerificationLoop.wait_for_recovery()` marked `# TODO`. Implement it in two parts:
 
 **Part A — Simulate mode (do this first):**
 ```python
@@ -141,7 +141,7 @@ return {"recovered": False, "final_p90_ms": p90, "threshold_ms": threshold_ms,
 
 ## Step 5 — Implement `AuditLogger.append()` ✏️
 
-Find `AuditLogger.append()` marked `# TODO` in the starter. It receives a `record` dict already assembled by `_write_audit()` — you don't build the dict. Your implementation is two lines:
+Open `autonomous_agent_starter.py`. Find `AuditLogger.append()` marked `# TODO`. It receives a `record` dict already assembled by `_write_audit()` — you don't build the dict. Your implementation is two lines:
 
 ```python
 with open(self.path, "a") as f:
