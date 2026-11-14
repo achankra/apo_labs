@@ -182,6 +182,23 @@ class LogsAgent:
 
 # ── TODO: Implement arbitration rules ─────────────────────────────────────────
 
+# ── PROVIDED: Arbitration helpers ────────────────────────────────────────────
+# Already defined here — reference these in your arbitrate() implementation.
+
+AGENT_WEIGHTS = {
+    "metrics": MetricsAgent.WEIGHT,   # 1.5
+    "logs":    LogsAgent.WEIGHT,      # 1.2
+}
+
+ACTION_MAP = {
+    "MEMORY_PRESSURE":       "pod.rolling_restart",
+    "DB_BOTTLENECK":         "db.connection_reset",
+    "DEPLOYMENT_REGRESSION": "config.rollback",
+    "CAPACITY_EXHAUSTION":   "scale.horizontal_add",
+    "DEPENDENCY_FAILURE":    "circuit.reset",
+}
+
+
 def arbitrate(findings: list[AgentFinding]) -> ArbitrationResult:
     """
     Apply deterministic arbitration rules to reach a consensus.

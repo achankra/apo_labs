@@ -126,13 +126,27 @@ class ActionExecutor:
             kubectl rollout restart deployment/{deployment} -n {namespace}
 
         Steps:
-        1. Record start time
-        2. If self.simulate: return success with fake output, skip kubectl
-        3. If self.dry_run:  return success with "[DRY RUN]" output, skip kubectl
-        4. Build the command for the action_id (see COMMANDS below)
-        5. Run with subprocess.run(..., capture_output=True, text=True, timeout=30)
-        6. Record end time
-        7. Return result dict
+        1. start = time.monotonic()
+        2. executed_at = datetime.now(timezone.utc).isoformat()
+        3. If self.simulate is True, return immediately — no kubectl:
+               {"action_id": action_id, "deployment": deployment, "namespace": namespace,
+                "executed_at": executed_at, "dry_run": False, "simulate": True,
+                "success": True,
+                "output": f"[SIMULATE] {action_id} on deployment/{deployment} -n {namespace}",
+                "error": "", "duration_ms": 0}
+        4. If self.dry_run is True, build cmd first, then return immediately — no kubectl:
+               cmd = COMMANDS[action_id]   (see COMMANDS dict below)
+               {"action_id": action_id, "deployment": deployment, "namespace": namespace,
+                "executed_at": executed_at, "dry_run": True, "simulate": False,
+                "success": True,
+                "output": "[DRY RUN] " + " ".join(cmd),
+                "error": "", "duration_ms": 0}
+        5. cmd = COMMANDS[action_id]
+        6. proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        7. duration_ms = int((time.monotonic() - start) * 1000)
+        8. success = proc.returncode == 0
+           Return dict using all fields in the return type above
+           (output=proc.stdout, error=proc.stderr, dry_run=False, simulate=False).
 
         COMMANDS = {
             "pod.rolling_restart": [
@@ -145,8 +159,60 @@ class ActionExecutor:
             ],
         }
         """
-        # TODO: implement this method
-        raise NotImplementedError("Implement ActionExecutor.execute()")
+        start = time.monotonic()
+        executed_at = datetime.now(timezone.utc).isoformat()
+        commands = {
+            "pod.rolling_restart": [
+                "kubectl", "rollout", "restart",
+                f"deployment/{deployment}", "-n", namespace,
+            ],
+            "config.rollback": [
+                "kubectl", "rollout", "undo",
+                f"deployment/{deployment}", "-n", namespace,
+            ],
+        }
+
+        if self.simulate:
+            success = True
+            output = f"[SIMULATED] Executed {action_id} for deployment/{deployment} in {namespace}"
+            error = ""
+        elif self.dry_run:
+            command = commands.get(action_id)
+            success = command is not None
+            output = "[DRY RUN] " + (" ".join(command) if command else f"Unknown action: {action_id}")
+            error = "" if success else f"Unknown action: {action_id}"
+        else:
+            command = commands.get(action_id)
+            if command is None:
+                success = False
+                output = ""
+                error = f"Unknown action: {action_id}"
+            else:
+                try:
+                    completed = subprocess.run(
+                        command, capture_output=True, text=True, timeout=30
+                    )
+                    success = completed.returncode == 0
+                    output = completed.stdout.strip()
+                    error = completed.stderr.strip()
+                except (subprocess.TimeoutExpired, OSError) as exc:
+                    success = False
+                    output = exc.stdout.strip() if isinstance(exc.stdout, str) else ""
+                    error = str(exc)
+
+        duration_ms = int((time.monotonic() - start) * 1000)
+        return {
+            "action_id": action_id,
+            "deployment": deployment,
+            "namespace": namespace,
+            "executed_at": executed_at,
+            "dry_run": self.dry_run,
+            "simulate": self.simulate,
+            "success": success,
+            "output": output,
+            "error": error,
+            "duration_ms": duration_ms,
+        }
 
 
 # ── TODO: Implement VerificationLoop ─────────────────────────────────────────

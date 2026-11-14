@@ -106,45 +106,31 @@ class GateOrchestrator:
     # ── Individual gates ──────────────────────────────────────────────────────
 
     def _cost_gate(self, proposal: ActionProposal) -> tuple[bool, str]:
-        limit = self.config.cost_per_hour_usd_max
-        actual = proposal.estimated_cost_per_hour_usd
-        if actual <= limit:
-            return True, ""
-        return (
-            False,
-            f"cost ${actual:.0f}/hr exceeds limit ${limit:.0f}/hr"
-        )
+        # TODO: Return (True, "") if proposal.estimated_cost_per_hour_usd
+        #       is at or below self.config.cost_per_hour_usd_max.
+        #       Otherwise return (False, "cost $X/hr exceeds limit $Y/hr").
+        raise NotImplementedError("Implement _cost_gate()")
 
     def _blast_radius_gate(self, proposal: ActionProposal) -> tuple[bool, str]:
-        limit  = self.config.blast_radius_max
-        actual = proposal.blast_radius_fraction
-        if actual <= limit:
-            return True, ""
-        return (
-            False,
-            f"blast radius {actual:.0%} exceeds limit {limit:.0%}"
-        )
+        # TODO: Return (True, "") if proposal.blast_radius_fraction
+        #       is at or below self.config.blast_radius_max.
+        #       Otherwise return (False, "blast radius X% exceeds limit Y%").
+        raise NotImplementedError("Implement _blast_radius_gate()")
 
     def _reversibility_gate(self, proposal: ActionProposal) -> tuple[bool, str]:
-        limit  = self.config.reversal_time_sec_max
-        actual = proposal.reversal_time_seconds
-        if actual <= limit:
-            return True, ""
-        return (
-            False,
-            f"reversal time {actual}s exceeds limit {limit}s"
-        )
+        # TODO: Return (True, "") if proposal.reversal_time_seconds
+        #       is at or below self.config.reversal_time_sec_max.
+        #       Otherwise return (False, "reversal time Xs exceeds limit Ys").
+        raise NotImplementedError("Implement _reversibility_gate()")
 
     def _time_gate(self, proposal: ActionProposal) -> tuple[bool, str]:
-        start_h, end_h = self.config.peak_hours_utc
-        current_h = datetime.now(timezone.utc).hour
-        if start_h <= current_h < end_h:
-            return (
-                False,
-                f"action blocked during peak hours "
-                f"({start_h:02d}:00\u2013{end_h:02d}:00 UTC), current hour={current_h:02d}"
-            )
-        return True, ""
+        # TODO: Block during peak hours.
+        #       Get the current UTC hour with datetime.now(timezone.utc).hour
+        #       Unpack self.config.peak_hours_utc as (start_h, end_h).
+        #       If start_h <= current_h < end_h: return
+        #           (False, "action blocked during peak hours (HH:00–HH:00 UTC), current hour=HH")
+        #       Otherwise return (True, "").
+        raise NotImplementedError("Implement _time_gate()")
 
 
 # ── Test harness ──────────────────────────────────────────────────────────────

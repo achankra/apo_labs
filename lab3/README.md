@@ -156,15 +156,24 @@ python3 orchestrator_starter.py --simulate
 
 Open `orchestrator_starter.py`. Find the `arbitrate(findings)` function marked `# TODO`. Apply all 5 rules **in order**:
 
-**Rule 1 — Timeout penalty:** For each timed-out agent: `confidence -= 0.05`. Append `"timeout_penalty: {agent_name}"`.
+**Rule 1 — Timeout penalty:** For each timed-out agent in `findings`: `confidence -= 0.05`. Append `"timeout_penalty: {agent_name}"` to `rules_applied`.
 
-**Rule 2 — Contradiction penalty:** If MetricsAgent and LogsAgent report *different* `symptom_class` values: subtract 0.15 from each agent's confidence. Append `"contradiction: metrics={...} vs logs={...}"`.
+**Rule 2 — Contradiction penalty:** If MetricsAgent and LogsAgent report *different* `symptom_class` values: subtract 0.15 from each agent's confidence. Append `"contradiction: metrics={metrics_symptom} vs logs={logs_symptom}"` to `rules_applied`.
 
-**Rule 3 — Corroboration bonus:** If MetricsAgent and LogsAgent report the *same* `symptom_class`: add 0.10 to each (cap at 1.0). Append `"corroboration: {symptom_class}"`.
+**Rule 3 — Corroboration bonus:** If MetricsAgent and LogsAgent report the *same* `symptom_class`: add 0.10 to each (cap at 1.0). Append `"corroboration: {symptom_class}"` to `rules_applied`.
 
 > Rules 2 and 3 are mutually exclusive — only one fires per run.
 
-**Rule 4 — Cascade override:** If ANY agent finds `DEPLOYMENT_REGRESSION` with `confidence >= 0.80`: return immediately with `action_id="config.rollback"`. Append `"cascade_override: DEPLOYMENT_REGRESSION"`.
+**Rule 4 — Cascade override:** If ANY agent finds `DEPLOYMENT_REGRESSION` with `confidence >= 0.80`: return immediately:
+   ```python
+   return ArbitrationResult(
+       symptom_class="DEPLOYMENT_REGRESSION",
+       action_id="config.rollback",
+       confidence=finding.confidence,
+       rules_applied=rules_applied + ["cascade_override: DEPLOYMENT_REGRESSION"],
+       winning_agent=finding.agent_name,
+   )
+   ```
 
 **Rule 5 — Weighted consensus:**
 ```
@@ -199,7 +208,17 @@ findings = list(await asyncio.gather(
 ))
 ```
 
-Then call `arbitrate(findings)` and `await self.action_agent.act(...)`.
+Then:
+```python
+result = arbitrate(findings)
+await self.action_agent.act(
+    action_id=result.action_id,
+    deployment=deployment,
+    namespace=namespace,
+    symptom_class=result.symptom_class,
+    confidence_score=result.confidence,
+)
+```
 
 > `Orchestrator.FAN_OUT_TIMEOUT_S = 0.050` (50 ms), the fully wired `ActionAgent`, and `main()` are all in the starter.
 

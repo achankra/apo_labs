@@ -124,7 +124,7 @@ Implement the APO confidence formula: `C = 0.35×S + 0.25×H + 0.25×R + 0.15×F
 | S — Signal Clarity | How clearly the metric signal indicates a problem | use `metrics["memory_usage_ratio"]` as `mem`: mem > 0.90 → 0.95 · mem > 0.85 → 0.80 · mem > 0.75 → 0.60 · else 0.40 |
 | H — Historical Match | How often this action resolved this symptom in the past | look up `(symptom_class, action_id)` in `HISTORICAL_MATCH` |
 | R — Remediation Confidence | How reliable this action is in general | look up `action_id` in `REMEDIATION_CONFIDENCE` |
-| F — Data Freshness | How recent the Prometheus scrape is | age < 30 s → 0.95 · < 60 → 0.80 · < 120 → 0.65 · else 0.40 |
+| F — Data Freshness | How recent the Prometheus scrape is | use `metrics["last_scrape_age_seconds"]` as `age`: age < 30 s → 0.95 · < 60 → 0.80 · < 120 → 0.65 · else 0.40 |
 
 The composite score drives the autonomy level:
 

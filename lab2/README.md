@@ -55,8 +55,16 @@ Open `action_catalog.yaml`. Each action specifies `risk_class`, `blast_radius_ma
 
 Open `autonomous_agent_starter.py`. Find the `ActionExecutor` class and its `execute()` method marked `# TODO`. Implement it:
 
-1. Record `start = time.monotonic()`
-2. If `self.simulate` → return a canned success dict (no kubectl). If `self.dry_run` → return a success dict with `"[DRY RUN]"` as output (no kubectl).
+1. Inside `execute()`, as the first line: `start = time.monotonic()`
+2. If `self.simulate` is `True` → return this dict immediately, no kubectl:
+   ```python
+   {"action_id": action_id, "deployment": deployment, "namespace": namespace,
+    "executed_at": datetime.now(timezone.utc).isoformat(),
+    "dry_run": False, "simulate": True, "success": True,
+    "output": f"[SIMULATE] {action_id} on deployment/{deployment} -n {namespace}",
+    "error": "", "duration_ms": 0}
+   ```
+   If `self.dry_run` is `True` → build `cmd` first (step 3), then return a similar dict with `"dry_run": True, "simulate": False` and `"output": "[DRY RUN] " + " ".join(cmd)` — no kubectl.
 3. Look up the right command:
 
 ```python
@@ -65,9 +73,11 @@ COMMANDS = {
     "config.rollback":     ["kubectl", "rollout", "undo",    f"deployment/{deployment}", "-n", namespace],
 }
 ```
+   Then look up: `cmd = COMMANDS[action_id]`
 
-4. Run with `subprocess.run(cmd, capture_output=True, text=True, timeout=30)`
-5. Return a dict with these keys: `action_id`, `deployment`, `namespace`, `executed_at` (ISO-8601), `dry_run`, `simulate`, `success` (bool), `output` (stdout), `error` (stderr), `duration_ms` (int) — the docstring in the starter lists the same keys.
+4. `proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)`
+5. `duration_ms = int((time.monotonic() - start) * 1000)`  and  `success = proc.returncode == 0`
+6. Return a dict with these keys: `action_id`, `deployment`, `namespace`, `executed_at` (ISO-8601), `dry_run`, `simulate`, `success` (bool), `output` (stdout), `error` (stderr), `duration_ms` (int) — the docstring in the starter lists the same keys.
 
 The `dry_run` flag lets you test the full decision path without restarting any pods — useful for validating gate logic during an incident.
 

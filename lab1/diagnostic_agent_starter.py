@@ -1,8 +1,22 @@
 """
-Lab 1 — diagnostic_agent.py  (SOLUTION)
-=========================================
-Complete implementation of the diagnostic agent.
-Do not share with students before the lab exercise.
+Lab 1 — diagnostic_agent.py  (STARTER)
+========================================
+Implement the diagnostic agent that maps live Prometheus metrics to
+a symptom class and computes a composite confidence score.
+
+New in this file (vs gate_starter.py)
+--------------------------------------
+  detect_symptom_class()       — rules-based symptom classification
+  ConfidenceScorer.compute()   — APO confidence formula C = 0.35S+0.25H+0.25R+0.15F
+  PrometheusClient.query()     — live Prometheus queries  (optional — real mode only)
+  MetricsReader.read()         — assembles the five-metric dict (optional — real mode only)
+
+Run (simulate mode — no cluster needed):
+    python3 diagnostic_agent_starter.py --simulate
+
+Run (real mode — requires k3d + Prometheus):
+    kubectl port-forward -n monitoring svc/prometheus 9090:9090 &
+    python3 diagnostic_agent_starter.py --prometheus-url http://localhost:9090
 """
 
 from __future__ import annotations
@@ -19,79 +33,44 @@ except ImportError:
 from gate_starter import GateOrchestrator, GateConfig, ActionProposal, GateResult
 
 
+# ── PROVIDED: Simulated metrics ───────────────────────────────────────────────
+# Used by --simulate so you can finish the lab without a live cluster.
+
 SIMULATED_METRICS = {
-    "memory_usage_ratio": 0.91,
-    "error_rate_ratio": 0.038,
-    "p99_latency_ms": 312,
-    "p99_baseline_ms": 45,
-    "restart_count_1h": 2,
+    "memory_usage_ratio":      0.91,
+    "error_rate_ratio":        0.038,
+    "p99_latency_ms":          312,
+    "p99_baseline_ms":         45,
+    "restart_count_1h":        2,
     "last_scrape_age_seconds": 12,
 }
 
 
-class PrometheusClient:
-    def __init__(self, base_url: str = "http://localhost:9090"):
-        self.base_url = base_url.rstrip("/")
+# ── TODO: Implement detect_symptom_class ─────────────────────────────────────
 
-    def query(self, promql: str) -> float | None:
-        endpoint = f"{self.base_url}/api/v1/query"
-        params = {"query": promql}
-        try:
-            response = requests.get(endpoint, params=params, timeout=5)
-            response.raise_for_status()
-            data = response.json()
-            result = data["data"]["result"]
-            if not result:
-                return None
-            return float(result[0]["value"][1])
-        except Exception:
-            return None
+def detect_symptom_class(metrics: dict[str, float]) -> str:
+    """
+    Map raw metric values to a named symptom class.
+
+    Apply these rules in order and return the FIRST that matches:
+
+    1. metrics["memory_usage_ratio"] > 0.85           → "MEMORY_PRESSURE"
+    2. metrics["p99_latency_ms"] > 500
+       AND metrics["error_rate_ratio"] > 0.05          → "DB_BOTTLENECK"
+    3. metrics["error_rate_ratio"] > 0.10              → "DEPLOYMENT_REGRESSION"
+    4. metrics["restart_count_1h"] > 5                 → "CAPACITY_EXHAUSTION"
+    5. else                                             → "UNKNOWN"
+    """
+    # TODO: implement this function
+    raise NotImplementedError("Implement detect_symptom_class()")
 
 
-class MetricsReader:
-    def __init__(self, client: PrometheusClient, deployment: str, namespace: str):
-        self.client     = client
-        self.deployment = deployment
-        self.namespace  = namespace
-
-    def read(self) -> dict[str, float]:
-        d = self.deployment
-
-        memory = self.client.query(
-            f'process_memory_usage_ratio{{deployment="{d}"}}'
-        ) or 0.0
-
-        error_rate = self.client.query(
-            f'rate(http_requests_total{{deployment="{d}",status_code=~"5.."}}[2m])'
-            f' / rate(http_requests_total{{deployment="{d}"}}[2m])'
-        ) or 0.0
-
-        p99 = self.client.query(
-            f'histogram_quantile(0.99,'
-            f'  rate(http_request_duration_seconds_bucket{{deployment="{d}"}}[2m])'
-            f') * 1000'
-        ) or 0.0
-
-        restarts = self.client.query(
-            f'increase(container_restart_total{{deployment="{d}"}}[1h])'
-        ) or 0.0
-
-        # Freshness: difference between now and the last scrape timestamp
-        last_scrape = self.client.query(
-            f'time() - max(scrape_time{{job="{d}"}})'
-        ) or 15.0
-
-        return {
-            "memory_usage_ratio":      round(memory, 4),
-            "error_rate_ratio":        round(error_rate, 4),
-            "p99_latency_ms":          round(p99, 2),
-            "p99_baseline_ms":         45.0,   # stored baseline
-            "restart_count_1h":        round(restarts, 1),
-            "last_scrape_age_seconds": round(last_scrape, 1),
-        }
-
+# ── TODO: Implement ConfidenceScorer ─────────────────────────────────────────
 
 class ConfidenceScorer:
+    """Computes the APO confidence formula: C = 0.35×S + 0.25×H + 0.25×R + 0.15×F"""
+
+    # PROVIDED — historical win-rates for (symptom_class, action_id) pairs
     HISTORICAL_MATCH = {
         ("MEMORY_PRESSURE",       "pod.rolling_restart"):  0.78,
         ("DB_BOTTLENECK",         "db.connection_reset"):  0.65,
@@ -100,6 +79,7 @@ class ConfidenceScorer:
         ("DEPENDENCY_FAILURE",    "circuit.reset"):        0.60,
     }
 
+    # PROVIDED — how reliable each action is in general
     REMEDIATION_CONFIDENCE = {
         "pod.rolling_restart":  0.90,
         "db.connection_reset":  0.75,
@@ -114,44 +94,111 @@ class ConfidenceScorer:
         symptom_class: str,
         action_id: str,
     ) -> dict[str, float]:
-        mem = metrics.get("memory_usage_ratio", 0.0)
-        if mem > 0.90:
-            S = 0.95
-        elif mem > 0.85:
-            S = 0.80
-        elif mem > 0.75:
-            S = 0.60
-        else:
-            S = 0.40
+        """
+        Compute: C = 0.35×S + 0.25×H + 0.25×R + 0.15×F
 
-        H = self.HISTORICAL_MATCH.get((symptom_class, action_id), 0.50)
-        R = self.REMEDIATION_CONFIDENCE.get(action_id, 0.50)
+        S — Signal Clarity  (use metrics["memory_usage_ratio"] as mem):
+            mem > 0.90 → 0.95
+            mem > 0.85 → 0.80
+            mem > 0.75 → 0.60
+            else       → 0.40
 
-        age = metrics.get("last_scrape_age_seconds", 60.0)
-        if age < 30:
-            F = 0.95
-        elif age < 60:
-            F = 0.80
-        elif age < 120:
-            F = 0.65
-        else:
-            F = 0.40
+        H — Historical Match:
+            Look up (symptom_class, action_id) in self.HISTORICAL_MATCH.
+            Use 0.50 if the pair is not found.
 
-        C = round(0.35 * S + 0.25 * H + 0.25 * R + 0.15 * F, 4)
-        return {"S": S, "H": H, "R": R, "F": F, "C": C}
+        R — Remediation Confidence:
+            Look up action_id in self.REMEDIATION_CONFIDENCE.
+            Use 0.50 if the action_id is not found.
+
+        F — Data Freshness  (use metrics["last_scrape_age_seconds"] as age):
+            age < 30  → 0.95
+            age < 60  → 0.80
+            age < 120 → 0.65
+            else      → 0.40
+
+        Return {"S": S, "H": H, "R": R, "F": F, "C": C}
+        where C = round(0.35*S + 0.25*H + 0.25*R + 0.15*F, 4).
+        """
+        # TODO: implement this method
+        raise NotImplementedError("Implement ConfidenceScorer.compute()")
 
 
-def detect_symptom_class(metrics: dict[str, float]) -> str:
-    if metrics.get("memory_usage_ratio", 0) > 0.85:
-        return "MEMORY_PRESSURE"
-    if metrics.get("p99_latency_ms", 0) > 500 and metrics.get("error_rate_ratio", 0) > 0.05:
-        return "DB_BOTTLENECK"
-    if metrics.get("error_rate_ratio", 0) > 0.10:
-        return "DEPLOYMENT_REGRESSION"
-    if metrics.get("restart_count_1h", 0) > 5:
-        return "CAPACITY_EXHAUSTION"
-    return "UNKNOWN"
+# ── TODO (OPTIONAL): Implement PrometheusClient ───────────────────────────────
+# Skip if working in simulate mode — run() falls back to SIMULATED_METRICS.
 
+class PrometheusClient:
+    """Sends PromQL instant queries to a Prometheus HTTP API."""
+
+    def __init__(self, base_url: str = "http://localhost:9090"):
+        self.base_url = base_url.rstrip("/")
+
+    def query(self, promql: str) -> float | None:
+        """
+        GET {self.base_url}/api/v1/query?query={promql}
+
+        The response JSON structure:
+            {"data": {"result": [{"value": [<timestamp>, "<value_string>"]}]}}
+
+        Steps:
+        1. Call requests.get(endpoint, params={"query": promql}, timeout=5)
+        2. Call response.raise_for_status()
+        3. Parse the JSON: data["data"]["result"]
+        4. If result is empty, return None
+        5. Return float(result[0]["value"][1])
+        6. On any exception, return None
+
+        OPTIONAL — implement for real-mode Prometheus integration.
+        """
+        # TODO (optional): implement this method
+        raise NotImplementedError("Implement PrometheusClient.query() — or use --simulate")
+
+
+# ── TODO (OPTIONAL): Implement MetricsReader ──────────────────────────────────
+# Skip if working in simulate mode — run() falls back to SIMULATED_METRICS.
+
+class MetricsReader:
+    """Queries Prometheus for all five metrics and returns them as a dict."""
+
+    def __init__(self, client: PrometheusClient, deployment: str, namespace: str):
+        self.client     = client
+        self.deployment = deployment
+        self.namespace  = namespace
+
+    def read(self) -> dict[str, float]:
+        """
+        Call self.client.query() five times (replace {d} with self.deployment)
+        and return a dict with these exact keys:
+
+            "memory_usage_ratio":
+                process_memory_usage_ratio{deployment="{d}"}
+
+            "error_rate_ratio":
+                rate(http_requests_total{deployment="{d}",status_code=~"5.."}[2m])
+                / rate(http_requests_total{deployment="{d}"}[2m])
+
+            "p99_latency_ms":
+                histogram_quantile(0.99,
+                    rate(http_request_duration_seconds_bucket{deployment="{d}"}[2m])
+                ) * 1000
+
+            "restart_count_1h":
+                increase(container_restart_total{deployment="{d}"}[1h])
+
+            "last_scrape_age_seconds":
+                time() - max(scrape_time{job="{d}"})
+
+        Default to 0.0 when query() returns None.
+        Set "p99_baseline_ms" to 45.0 (stored baseline — not queried from Prometheus).
+        Round values to reasonable precision (e.g. round(x, 4)).
+
+        OPTIONAL — implement for real-mode Prometheus integration.
+        """
+        # TODO (optional): implement this method
+        raise NotImplementedError("Implement MetricsReader.read() — or use --simulate")
+
+
+# ── PROVIDED ──────────────────────────────────────────────────────────────────
 
 def symptom_to_action(symptom_class: str) -> str:
     return {
@@ -175,7 +222,7 @@ def run(prometheus_url: str, simulate: bool) -> None:
     namespace  = "default"
 
     print("\n" + "=" * 65)
-    print("LAB 1 — DIAGNOSTIC AGENT  (SOLUTION)")
+    print("LAB 1 — DIAGNOSTIC AGENT")
     print("=" * 65)
 
     if simulate:
@@ -183,23 +230,37 @@ def run(prometheus_url: str, simulate: bool) -> None:
         metrics = SIMULATED_METRICS
     else:
         if not HAS_REQUESTS:
-            print("ERROR: 'requests' not installed.")
+            print("ERROR: 'requests' not installed. Run: pip3 install requests")
             sys.exit(1)
-        client  = PrometheusClient(prometheus_url)
-        reader  = MetricsReader(client, deployment, namespace)
-        metrics = reader.read()
+        client = PrometheusClient(prometheus_url)
+        reader = MetricsReader(client, deployment, namespace)
+        try:
+            metrics = reader.read()
+        except NotImplementedError:
+            print("NOTE: MetricsReader.read() not yet implemented — falling back to SIMULATED_METRICS")
+            metrics = SIMULATED_METRICS
 
     print(f"\nMetrics for {deployment}:")
     for k, v in metrics.items():
         print(f"  {k:<35} {v}")
 
-    symptom_class = detect_symptom_class(metrics)
-    action_id     = symptom_to_action(symptom_class)
+    try:
+        symptom_class = detect_symptom_class(metrics)
+    except NotImplementedError:
+        print("\ndetect_symptom_class() not yet implemented.")
+        return
+
+    action_id = symptom_to_action(symptom_class)
     print(f"\nSymptom class:   {symptom_class}")
     print(f"Proposed action: {action_id}")
 
     scorer = ConfidenceScorer()
-    scores = scorer.compute(metrics, symptom_class, action_id)
+    try:
+        scores = scorer.compute(metrics, symptom_class, action_id)
+    except NotImplementedError:
+        print("\nConfidenceScorer.compute() not yet implemented.")
+        return
+
     print(f"\nConfidence scores:")
     print(f"  S: {scores['S']:.2f}  H: {scores['H']:.2f}  "
           f"R: {scores['R']:.2f}  F: {scores['F']:.2f}")
