@@ -51,8 +51,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "lab1" / "solution"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "lab2"))
 
 try:
-    from gate import GateOrchestrator, GateConfig, ActionProposal
-    from diagnostic_agent import (
+    from gate_starter import GateOrchestrator, GateConfig, ActionProposal
+    from diagnostic_agent_starter import (
         PrometheusClient, ConfidenceScorer, autonomy_level, SIMULATED_METRICS
     )
 except ImportError:
@@ -259,7 +259,7 @@ class ActionAgent:
         namespace:  str,
     ) -> dict:
         try:
-            from gate import GateOrchestrator, GateConfig, ActionProposal
+            from gate_starter import GateOrchestrator, GateConfig, ActionProposal
         except ImportError:
             return {"outcome": "IMPORT_ERROR"}
 
