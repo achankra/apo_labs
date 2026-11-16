@@ -81,7 +81,7 @@ incident trigger
 Open `orchestrator_starter.py`. Search for `# ── TODO: Implement MetricsAgent` (around line 109). Inside the `MetricsAgent` class, fill in the `diagnose()` method — replace the `raise NotImplementedError` line with your implementation.
 
 **Simulate mode (required):**
-1. `await asyncio.sleep(0.03)` — simulated latency
+1. `await asyncio.sleep(0.02)` — simulated latency
 2. Return an `AgentFinding` built from `SIMULATED_METRICS_FINDING`
 
 `SIMULATED_METRICS_FINDING` is a dict already defined in the starter. Build the return value like this:
@@ -118,7 +118,7 @@ Open `orchestrator_starter.py`. Search for `# ── TODO: Implement LogsAgent` 
 
 **Simulate mode (required):**
 ```python
-await asyncio.sleep(0.05)
+await asyncio.sleep(0.03)
 return AgentFinding(agent_name="logs", **SIMULATED_LOGS_FINDING, timed_out=False)
 ```
 
@@ -140,8 +140,11 @@ return AgentFinding(agent_name="logs", **SIMULATED_LOGS_FINDING, timed_out=False
 Smoke-test your two agents:
 
 ```bash
-python3 orchestrator_starter.py --simulate
-# Expected: NotImplementedError: Implement arbitrate() — that means your agents ran
+python3 -c "import asyncio, orchestrator_starter as o; print(asyncio.run(o.MetricsAgent(None, simulate=True).diagnose('payment-service', 'default')))"
+python3 -c "import asyncio, orchestrator_starter as o; print(asyncio.run(o.LogsAgent(simulate=True).diagnose('payment-service', 'default')))"
+# Expected: AgentFinding(agent_name='metrics', symptom_class='MEMORY_PRESSURE', ... confidence=0.84 ...)
+#           AgentFinding(agent_name='logs',    symptom_class='MEMORY_PRESSURE', ... confidence=0.76 ...)
+# (Running orchestrator_starter.py itself still says "Implement Orchestrator.run()" until the take-home.)
 ```
 
 ---
@@ -220,7 +223,7 @@ await self.action_agent.act(
 )
 ```
 
-> `Orchestrator.FAN_OUT_TIMEOUT_S = 0.050` (50 ms), the fully wired `ActionAgent`, and `main()` are all in the starter.
+> `Orchestrator.FAN_OUT_TIMEOUT_S = 0.050` (50 ms in simulate mode; `main()` raises it to `REAL_FAN_OUT_TIMEOUT_S = 10.0` in real mode, because Prometheus queries and `kubectl logs` take seconds), the fully wired `ActionAgent` (it runs the command for the arbitrated action and escalates if there is no executor for it), and `main()` are all in the starter. Keep simulated agent latencies well under 50 ms: an agent that sleeps 50 ms against a 50 ms timeout times out on almost every run.
 
 ---
 
@@ -239,11 +242,11 @@ python orchestrator_starter.py --simulate
 Expected:
 
 ```
-✅  metrics     → MEMORY_PRESSURE         C=0.84 (30ms)
-✅  logs        → MEMORY_PRESSURE         C=0.76 (50ms)
-Arbitration rules: ['corroboration: MEMORY_PRESSURE']
-Consensus: MEMORY_PRESSURE → pod.rolling_restart  C=0.9400
-Action: EXECUTED (total wall time ~90ms)
+✅  metrics    → MEMORY_PRESSURE           C=0.84 (22ms)
+✅  logs       → MEMORY_PRESSURE           C=0.76 (31ms)
+Arbitration rules: ['corroboration: MEMORY_PRESSURE', 'weighted_consensus: MEMORY_PRESSURE (score=2.4420)']
+Consensus:  MEMORY_PRESSURE  →  pod.rolling_restart  C=0.9400
+Action: EXECUTED (total wall time ~31ms)
 ```
 
 ---
@@ -252,7 +255,7 @@ Action: EXECUTED (total wall time ~90ms)
 
 **Contradiction:** Temporarily set `SIMULATED_LOGS_FINDING` to `symptom_class="DB_BOTTLENECK"`. Rerun — the contradiction penalty should fire. Notice how the confidence drop changes the autonomy decision.
 
-**Cascade override:** Set `SIMULATED_METRICS_FINDING` to `symptom_class="DEPLOYMENT_REGRESSION"` and `confidence=0.85`. Verify `config.rollback` is returned regardless of the logs agent.
+**Cascade override:** Set `SIMULATED_METRICS_FINDING` to `symptom_class="DEPLOYMENT_REGRESSION"` and `confidence=0.96`. (The contradiction penalty runs first and takes 0.15 off, so the finding needs to start above 0.95 to still clear the 0.80 cascade threshold.) Verify `config.rollback` is returned regardless of the logs agent.
 
 **Timeout:** Add `await asyncio.sleep(0.1)` inside `MetricsAgent.diagnose()`. Verify the agent returns `timed_out=True`, the timeout penalty fires, and the pipeline still completes on time using only the logs agent.
 
@@ -262,7 +265,7 @@ Action: EXECUTED (total wall time ~90ms)
 
 **In-class:**
 - [ ] Both agents return valid `AgentFinding` objects in simulate mode
-- [ ] Running the starter raises `NotImplementedError: Implement arbitrate()` — not an import error
+- [ ] The two smoke-test commands in Step 3 print an `AgentFinding` for each agent — not an import error
 
 **Take-home:**
 - [ ] Full pipeline runs in simulate mode in < 200 ms

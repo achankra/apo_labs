@@ -28,12 +28,13 @@ actions:
   - action_id: db.connection_reset
     display_name: "Database Connection Pool Reset"
     description: >
-      Scales the target Deployment to 0 replicas, waits 10 seconds, then
-      scales back up. Forces all database connections to be re-established.
+      Rolling restart of the target Deployment: pods are replaced one at a
+      time and each new pod opens fresh database connections. The service
+      stays available throughout (never scale to 0 — that is a full outage).
     risk_class: medium
-    blast_radius_max: 0.05
-    reversal_command: "kubectl scale deployment/{deployment} --replicas={original_replicas} -n {namespace}"
-    reversal_time_seconds: 240
+    blast_radius_max: 0.10        # one pod at a time, same as pod.rolling_restart
+    reversal_command: "kubectl rollout undo deployment/{deployment} -n {namespace}"
+    reversal_time_seconds: 120
     required_confidence: 0.82
     allowed_environments:
       - lab
@@ -51,7 +52,7 @@ actions:
       Fastest recovery path for bad deployments.
     risk_class: low
     blast_radius_max: 0.08
-    reversal_command: "kubectl rollout restart deployment/{deployment} -n {namespace}"
+    reversal_command: "kubectl rollout undo deployment/{deployment} -n {namespace}"   # undoing the undo restores the newer revision
     reversal_time_seconds: 90
     required_confidence: 0.85
     allowed_environments:

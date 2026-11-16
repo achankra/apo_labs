@@ -80,7 +80,7 @@ Safety gates are binary pass/fail checks that run before any action is committed
 | Cost | Automation that blows the hourly budget | $500/hr |
 | Blast radius | Restarting more than N% of pods at once | 10% of running pods |
 | Reversibility | Actions that take longer to undo than your incident SLO | 600 s reversal time |
-| Time | Changes during peak traffic hours | Block 09:00–17:00 UTC |
+| Time | Changes during peak traffic hours | Block 08:00–10:00 UTC |
 
 > **🤖 Claude in production:** The thresholds in `GateConfig` are lab constants. In a live system, Claude would derive these from historical incident data — calculating the blast-radius limit from past remediations and the cost ceiling from approved budget. The gate code stays deterministic; Claude tunes the numbers.
 
@@ -154,9 +154,10 @@ Expected:
 
 ```
 Symptom class:  MEMORY_PRESSURE
-C (Composite):  0.84xx
+C (Composite):  0.8950
+Autonomy level: L4 — act + notify
 ✅  DECISION: Execute pod.rolling_restart on payment-service
-   Confidence: 0.84xx → L4 — act + notify
+   C=0.8950 → L4 — act + notify
 ```
 
 ---

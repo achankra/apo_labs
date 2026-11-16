@@ -1,8 +1,22 @@
 """
-Lab 2 — autonomous_agent.py  (SOLUTION)
-=========================================
-Complete autonomous single-agent remediation loop.
-Do not share with students before the lab exercise.
+Lab 2 — autonomous_agent.py  (STARTER)
+========================================
+Extend Lab 1 to build a fully autonomous single-agent remediation loop:
+  detect → diagnose → gate → execute → verify → audit
+
+New in Lab 2 vs Lab 1
+----------------------
+1. Load action catalog from action_catalog.yaml
+2. Execute the approved action via kubectl rollout restart
+3. Verification loop — poll P90 latency until it drops to 1.5× baseline
+4. JSONL audit log — append one record per run (full telemetry → score → gate → outcome)
+
+Run (simulate mode — no cluster needed):
+    python autonomous_agent_starter.py --simulate
+
+Run (real mode — requires k3d + Prometheus):
+    kubectl port-forward -n monitoring svc/prometheus 9090:9090 &
+    python autonomous_agent_starter.py --prometheus-url http://localhost:9090
 """
 
 from __future__ import annotations
@@ -73,99 +87,53 @@ class ActionExecutor:
         self.simulate = simulate
 
     def execute(self, action_id: str, deployment: str, namespace: str) -> dict:
-        started_at = time.monotonic()
-        ts = datetime.now(timezone.utc).isoformat()
-
-        if self.simulate:
-            elapsed = int((time.monotonic() - started_at) * 1000)
-            return {
-                "action_id":   action_id,
-                "deployment":  deployment,
-                "namespace":   namespace,
-                "executed_at": ts,
-                "dry_run":     False,
-                "simulate":    True,
-                "success":     True,
-                "output":      f"[SIMULATE] kubectl rollout restart deployment/{deployment} -n {namespace}",
-                "error":       "",
-                "duration_ms": elapsed,
+        """
+        Execute the action and return a result dict:
+            {
+              "action_id":    str,
+              "deployment":   str,
+              "namespace":    str,
+              "executed_at":  ISO-8601 string,
+              "dry_run":      bool,
+              "simulate":     bool,
+              "success":      bool,
+              "output":       str,   # stdout / simulated message
+              "error":        str,   # stderr / "" on success
+              "duration_ms":  int,
             }
 
-        commands: dict[str, list[str]] = {
+        For pod.rolling_restart: run
+            kubectl rollout restart deployment/{deployment} -n {namespace}
+
+        Steps:
+        1. Record start time
+        2. If self.simulate: return success with fake output, skip kubectl
+        3. If self.dry_run:  return success with "[DRY RUN]" output, skip kubectl
+        4. Build the command for the action_id (see COMMANDS below)
+        5. Run with subprocess.run(..., capture_output=True, text=True, timeout=30)
+        6. Record end time
+        7. Return result dict
+
+        COMMANDS = {
             "pod.rolling_restart": [
                 "kubectl", "rollout", "restart",
-                f"deployment/{deployment}", "-n", namespace,
+                f"deployment/{deployment}", "-n", namespace
+            ],
+            "db.connection_reset": [
+                "kubectl", "rollout", "restart",
+                f"deployment/{deployment}", "-n", namespace
             ],
             "config.rollback": [
                 "kubectl", "rollout", "undo",
-                f"deployment/{deployment}", "-n", namespace,
-            ],
-            "scale.horizontal_add": [
-                "kubectl", "scale", f"deployment/{deployment}",
-                "--replicas=3", "-n", namespace,
+                f"deployment/{deployment}", "-n", namespace
             ],
         }
+        """
+        # TODO: implement this method
+        raise NotImplementedError("Implement ActionExecutor.execute()")
 
-        cmd = commands.get(action_id)
-        if cmd is None:
-            return {
-                "action_id":   action_id,
-                "deployment":  deployment,
-                "namespace":   namespace,
-                "executed_at": ts,
-                "dry_run":     self.dry_run,
-                "simulate":    False,
-                "success":     False,
-                "output":      "",
-                "error":       f"No command mapping for action_id={action_id}",
-                "duration_ms": 0,
-            }
 
-        if self.dry_run:
-            elapsed = int((time.monotonic() - started_at) * 1000)
-            return {
-                "action_id":   action_id,
-                "deployment":  deployment,
-                "namespace":   namespace,
-                "executed_at": ts,
-                "dry_run":     True,
-                "simulate":    False,
-                "success":     True,
-                "output":      f"[DRY RUN] Would execute: {' '.join(cmd)}",
-                "error":       "",
-                "duration_ms": elapsed,
-            }
-
-        try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30
-            )
-            elapsed = int((time.monotonic() - started_at) * 1000)
-            return {
-                "action_id":   action_id,
-                "deployment":  deployment,
-                "namespace":   namespace,
-                "executed_at": ts,
-                "dry_run":     False,
-                "simulate":    False,
-                "success":     proc.returncode == 0,
-                "output":      proc.stdout.strip(),
-                "error":       proc.stderr.strip(),
-                "duration_ms": elapsed,
-            }
-        except subprocess.TimeoutExpired:
-            return {
-                "action_id":   action_id,
-                "deployment":  deployment,
-                "namespace":   namespace,
-                "executed_at": ts,
-                "dry_run":     False,
-                "simulate":    False,
-                "success":     False,
-                "output":      "",
-                "error":       "kubectl timed out after 30s",
-                "duration_ms": 30000,
-            }
+# ── TODO: Implement VerificationLoop ─────────────────────────────────────────
 
 
 class VerificationLoop:
@@ -186,51 +154,37 @@ class VerificationLoop:
         deployment: str,
         baseline_p90_ms: float,
     ) -> dict:
-        threshold_ms = baseline_p90_ms * 1.5
-        start        = time.monotonic()
-        polls        = 0
-        final_p90    = 0.0
+        """
+        Poll until P90 latency < 1.5× baseline OR timeout.
 
-        while True:
-            elapsed = time.monotonic() - start
+        Returns:
+            {
+              "recovered":           bool,
+              "final_p90_ms":        float,
+              "threshold_ms":        float,   # 1.5 × baseline
+              "elapsed_seconds":     float,
+              "polls":               int,
+            }
 
-            if self.simulate:
-                # Simulate: returns healthy after first poll interval
-                if elapsed >= self.poll_interval:
-                    final_p90 = SIMULATED_POST_RESTART["p99_latency_ms"]
-                else:
-                    final_p90 = 350.0  # still recovering
-            else:
-                promql = (
-                    f'histogram_quantile(0.90,'
-                    f'  rate(http_request_duration_seconds_bucket'
-                    f'{{deployment="{deployment}"}}[1m])'
-                    f') * 1000'
-                )
-                result   = self.client.query(promql) if self.client else None
-                final_p90 = result if result is not None else threshold_ms + 1
+        Polling logic:
+        1. Record start time
+        2. Loop until elapsed >= timeout_seconds:
+           a. If simulate: use SIMULATED_POST_RESTART["p99_latency_ms"] as p90
+           b. Else: query Prometheus for
+              histogram_quantile(0.90,
+                rate(http_request_duration_seconds_bucket{deployment="..."}[1m])
+              ) * 1000
+           c. If p90 < threshold: return recovered=True immediately
+           d. Sleep poll_interval seconds
+        3. If loop exits without recovery: return recovered=False with final values
 
-            polls += 1
+        Hint: threshold_ms = baseline_p90_ms * 1.5
+        """
+        # TODO: implement this method
+        raise NotImplementedError("Implement VerificationLoop.wait_for_recovery()")
 
-            if final_p90 < threshold_ms:
-                return {
-                    "recovered":        True,
-                    "final_p90_ms":     round(final_p90, 1),
-                    "threshold_ms":     round(threshold_ms, 1),
-                    "elapsed_seconds":  round(elapsed, 1),
-                    "polls":            polls,
-                }
 
-            if elapsed >= self.timeout:
-                return {
-                    "recovered":        False,
-                    "final_p90_ms":     round(final_p90, 1),
-                    "threshold_ms":     round(threshold_ms, 1),
-                    "elapsed_seconds":  round(elapsed, 1),
-                    "polls":            polls,
-                }
-
-            time.sleep(self.poll_interval)
+# ── TODO: Implement AuditLogger ───────────────────────────────────────────────
 
 
 class AuditLogger:
@@ -238,8 +192,30 @@ class AuditLogger:
         self.path = path
 
     def append(self, record: dict) -> None:
-        with open(self.path, "a") as f:
-            f.write(json.dumps(record) + "\n")
+        """
+        Append `record` as a single JSON line to self.path.
+
+        Hint:
+            with open(self.path, "a") as f:
+                f.write(json.dumps(record) + "\n")
+        """
+        # TODO: implement this method
+        raise NotImplementedError("Implement AuditLogger.append()")
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+
+class _SafeLogger:
+    """Lets run() finish before AuditLogger.append() is implemented."""
+    def __init__(self, inner: AuditLogger):
+        self.inner, self.written = inner, False
+    def append(self, record: dict) -> None:
+        try:
+            self.inner.append(record)
+            self.written = True
+        except NotImplementedError:
+            print("AuditLogger.append() not yet implemented — audit record not written")
 
 
 def run(prometheus_url: str, simulate: bool, dry_run: bool) -> None:
@@ -248,7 +224,7 @@ def run(prometheus_url: str, simulate: bool, dry_run: bool) -> None:
     run_id     = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     print("\n" + "=" * 65)
-    print("LAB 2 — AUTONOMOUS REMEDIATION AGENT  (SOLUTION)")
+    print("LAB 2 — AUTONOMOUS REMEDIATION AGENT")
     print("=" * 65)
     print(f"Run ID: {run_id}")
 
@@ -294,7 +270,7 @@ def run(prometheus_url: str, simulate: bool, dry_run: bool) -> None:
     gate_result  = orchestrator.evaluate(proposal)
     print(f"\nGate: {gate_result}")
 
-    logger = AuditLogger()
+    logger = _SafeLogger(AuditLogger())
 
     if not gate_result.approved:
         print("\n🚫  BLOCKED")
@@ -311,7 +287,11 @@ def run(prometheus_url: str, simulate: bool, dry_run: bool) -> None:
         return
 
     executor    = ActionExecutor(dry_run=dry_run, simulate=simulate)
-    exec_result = executor.execute(action_id, deployment, namespace)
+    try:
+        exec_result = executor.execute(action_id, deployment, namespace)
+    except NotImplementedError:
+        print("\nActionExecutor.execute() not yet implemented — skipping execution")
+        return
 
     label = "[DRY RUN] " if dry_run else ("[SIMULATE] " if simulate else "")
     if exec_result["success"]:
@@ -327,7 +307,11 @@ def run(prometheus_url: str, simulate: bool, dry_run: bool) -> None:
     verifier     = VerificationLoop(client=client, simulate=simulate)
     print(f"\nVerifying recovery (threshold: P90 < {baseline_p90 * 1.5:.0f}ms) …")
 
-    verify_result = verifier.wait_for_recovery(deployment, baseline_p90)
+    try:
+        verify_result = verifier.wait_for_recovery(deployment, baseline_p90)
+    except NotImplementedError:
+        print("VerificationLoop.wait_for_recovery() not yet implemented")
+        return
 
     if verify_result["recovered"]:
         print(f"✅  Recovered in {verify_result['elapsed_seconds']:.0f}s "
@@ -340,7 +324,8 @@ def run(prometheus_url: str, simulate: bool, dry_run: bool) -> None:
     logger.append(_build_record(run_id, deployment, namespace, symptom_class,
                                 action_id, scores, gate_result,
                                 exec_result, verify_result, outcome))
-    print(f"\nAudit written to {AUDIT_LOG_PATH}")
+    if logger.written:
+        print(f"\nAudit written to {AUDIT_LOG_PATH}")
     print()
 
 

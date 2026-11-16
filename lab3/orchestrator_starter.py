@@ -122,7 +122,7 @@ class MetricsAgent:
 
     async def diagnose(self, deployment: str, namespace: str) -> AgentFinding:
         """
-        1. If simulate: sleep 0.05s (simulated latency), return SIMULATED_METRICS_FINDING
+        1. If simulate: sleep 0.02s (simulated latency), return SIMULATED_METRICS_FINDING
         2. Else: query Prometheus for memory_usage_ratio, error_rate_ratio, restarts
         3. Use detect_symptom_class() and ConfidenceScorer to build the finding
         4. Return AgentFinding(agent_name="metrics", ...)
@@ -161,7 +161,7 @@ class LogsAgent:
 
     async def diagnose(self, deployment: str, namespace: str) -> AgentFinding:
         """
-        1. If simulate: sleep 0.08s, return SIMULATED_LOGS_FINDING
+        1. If simulate: sleep 0.03s, return SIMULATED_LOGS_FINDING
         2. Else: run `kubectl logs deployment/{deployment} -n {namespace} --since=10m`
         3. Scan output for patterns in LOG_PATTERNS
         4. Count occurrences of each pattern
@@ -286,6 +286,24 @@ class ActionAgent:
         if result.final_confidence < 0.60:
             return {"outcome": "ESCALATED", "confidence": result.final_confidence}
 
+        commands = {
+            "pod.rolling_restart":  ["kubectl", "rollout", "restart",
+                                     f"deployment/{deployment}", "-n", namespace],
+            "db.connection_reset":  ["kubectl", "rollout", "restart",
+                                     f"deployment/{deployment}", "-n", namespace],
+            "config.rollback":      ["kubectl", "rollout", "undo",
+                                     f"deployment/{deployment}", "-n", namespace],
+            "scale.horizontal_add": ["kubectl", "scale", f"deployment/{deployment}",
+                                     "--replicas=3", "-n", namespace],
+        }
+        cmd = commands.get(result.agreed_action_id)
+        if cmd is None:
+            return {
+                "outcome":   "ESCALATED",
+                "action_id": result.agreed_action_id,
+                "reason":    f"no executor for {result.agreed_action_id}; escalating to a human",
+            }
+
         if self.simulate:
             return {
                 "outcome":      "EXECUTED",
@@ -293,16 +311,12 @@ class ActionAgent:
                 "deployment":   deployment,
                 "simulate":     True,
                 "success":      True,
-                "output":       f"[SIMULATE] kubectl rollout restart deployment/{deployment}",
+                "output":       f"[SIMULATE] {' '.join(cmd)}",
                 "duration_ms":  42,
             }
 
         # Real execution (requires kubectl)
         import subprocess
-        cmd = [
-            "kubectl", "rollout", "restart",
-            f"deployment/{deployment}", "-n", namespace,
-        ]
         if self.dry_run:
             return {
                 "outcome":    "EXECUTED",
@@ -333,7 +347,8 @@ class Orchestrator:
     Hands off to ActionAgent.
     """
 
-    FAN_OUT_TIMEOUT_S = 0.050   # 50ms per agent
+    FAN_OUT_TIMEOUT_S      = 0.050   # simulate mode: 50ms per agent
+    REAL_FAN_OUT_TIMEOUT_S = 10.0    # real mode: Prometheus + kubectl logs need seconds, not ms
 
     def __init__(
         self,
@@ -394,6 +409,8 @@ async def main(prometheus_url: str, simulate: bool, dry_run: bool) -> None:
     action_agent  = ActionAgent(simulate=simulate, dry_run=dry_run)
 
     orchestrator = Orchestrator(metrics_agent, logs_agent, action_agent)
+    if not simulate:
+        orchestrator.FAN_OUT_TIMEOUT_S = Orchestrator.REAL_FAN_OUT_TIMEOUT_S
 
     try:
         result = await orchestrator.run(deployment, namespace)

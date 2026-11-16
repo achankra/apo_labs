@@ -41,7 +41,7 @@ class GateConfig:
     cost_per_hour_usd_max: float = 500.0
     blast_radius_max: float      = 0.10
     reversal_time_sec_max: int   = 600
-    peak_hours_utc: tuple        = (9, 17)
+    peak_hours_utc: tuple        = (8, 10)
 
 
 class GateOrchestrator:

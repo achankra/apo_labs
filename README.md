@@ -148,15 +148,15 @@ pip3 install -r requirements.txt
 
 ## ✅ Workshop Readiness Checkpoint
 
-Run these before the workshop. Each script runs in simulate mode — it exercises the full code path without touching a cluster or making any API calls. If all four pass without errors, your Python environment and dependencies are correct.
+Run these before the workshop. Each script runs in simulate mode, without a cluster or any API calls. The starters are deliberately incomplete — you fill them in during the labs — so the expected result is a "not implemented" message, **not** a Python error. If you see the messages below and no `ImportError`, `ModuleNotFoundError` or `SyntaxError`, your environment is ready.
 
 **macOS / Linux:**
 
 ```bash
-python3 lab1/gate_starter.py --simulate              # expect: 4 TODO gates defined
-python3 lab1/diagnostic_agent_starter.py --simulate  # expect: ✅ DECISION: Execute
-python3 lab2/autonomous_agent_starter.py --simulate  # expect: ✅ Recovered
-python3 lab3/orchestrator_starter.py --simulate      # expect: Action: EXECUTED
+python3 lab1/gate_starter.py --simulate              # expect: Results: 0/4 tests passed (the 4 gates are TODOs)
+python3 lab1/diagnostic_agent_starter.py --simulate  # expect: detect_symptom_class() not yet implemented
+python3 lab2/autonomous_agent_starter.py --simulate  # expect: ActionExecutor.execute() not yet implemented — skipping execution
+python3 lab3/orchestrator_starter.py --simulate      # expect: Not implemented: Implement Orchestrator.run()
 ```
 
 **Windows:**
@@ -168,7 +168,18 @@ python lab2\autonomous_agent_starter.py --simulate
 python lab3\orchestrator_starter.py --simulate
 ```
 
-All four passing with no errors = ready. Email ajay@platformetrics.com if any step fails.
+To see what the finished pipeline looks like, run the reference solutions:
+
+```bash
+python3 lab1/solution/gate.py --simulate               # expect: Results: 4/4 tests passed
+python3 lab1/solution/diagnostic_agent.py --simulate   # expect: ✅  DECISION: Execute pod.rolling_restart
+python3 lab2/solution/autonomous_agent.py --simulate   # expect: ✅  Recovered in 10s
+python3 lab3/solution/orchestrator.py --simulate       # expect: Action: EXECUTED
+```
+
+> The Lab 1 time gate blocks actions between 08:00 and 10:00 UTC. If you run the solutions in that window, the time gate correctly blocks them — run again outside it.
+
+All four starters showing their "not implemented" message with no Python errors = ready. Email ajay@platformetrics.com if any step fails.
 
 ---
 

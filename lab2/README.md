@@ -70,6 +70,7 @@ Open `autonomous_agent_starter.py`. Find the `ActionExecutor` class and its `exe
 ```python
 COMMANDS = {
     "pod.rolling_restart": ["kubectl", "rollout", "restart", f"deployment/{deployment}", "-n", namespace],
+    "db.connection_reset": ["kubectl", "rollout", "restart", f"deployment/{deployment}", "-n", namespace],
     "config.rollback":     ["kubectl", "rollout", "undo",    f"deployment/{deployment}", "-n", namespace],
 }
 ```
