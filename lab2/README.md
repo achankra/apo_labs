@@ -225,6 +225,74 @@ Set `blast_radius_fraction=0.15` on the `ActionProposal` in `run()` and re-run w
 
 ---
 
+## Optional Take-Home: Explain the Decision (any model)
+
+Your loop now makes a decision, acts, verifies and writes an audit record. The last step in a real system is telling a person what happened: the "act and notify" message at L4, or the recommendation an engineer approves at L2. Writing that message is one of the jobs a language model is genuinely good at.
+
+`explain_decision.py` reads the last record in `apo_audit.jsonl` and produces that message. Two rules make it safe:
+
+1. **The model explains a decision that has already been made.** The record is written before the model sees it, so nothing it writes can change what happened.
+2. **Code checks the explanation before anyone reads it.** Every number and every action or symptom name in the text must appear in the record. If the model adds anything that isn't there, its text is rejected and a plain template built from the record is used instead.
+
+This is the same discipline as the rest of the course: the model is useful, the harness decides what you trust.
+
+### Setup (only for `--llm`)
+
+The script works with Claude, with any OpenAI-compatible API, or with a local model. It uses `requests`, which you already installed.
+
+```bash
+# Claude (default)
+export ANTHROPIC_API_KEY=...
+export APO_LLM_MODEL=claude-haiku-5-5        # optional
+
+# Any OpenAI-compatible API
+export APO_LLM_PROVIDER=openai
+export APO_LLM_BASE_URL=https://api.example.com/v1
+export APO_LLM_API_KEY=...
+export APO_LLM_MODEL=<model name>
+
+# A local model, no key and no cost (Ollama)
+export APO_LLM_PROVIDER=openai
+export APO_LLM_BASE_URL=http://localhost:11434/v1
+export APO_LLM_MODEL=llama3.2
+```
+
+### Steps
+
+**1. Create a record.** Run the loop once so there's something to explain:
+
+```bash
+python3 lab2/solution/autonomous_agent.py --simulate   # or your own version
+```
+
+**2. Get the template message (no model call).**
+
+```bash
+python3 lab2/explain_decision.py
+```
+
+This is the fallback: correct, complete and a little stiff.
+
+**3. Let a model write it.**
+
+```bash
+python3 lab2/explain_decision.py --llm --show-rejected
+```
+
+If the grounding check passes, you'll see the model's version. If it fails, you'll see which claims weren't in the record, the rejected draft and the template in its place.
+
+**4. Watch the check catch something.** Models often add plausible details: a percentage of traffic, a pod count, a cause. The record from Step 1 has no blast-radius field, so a draft that says "affected 5% of traffic" is rejected, even though 5% is the value the agent used. Ask yourself: should that fact be in the audit record? (It should. Adding the gate inputs to `_build_record()` is a good follow-up.)
+
+**5. Try a blocked decision.** Edit `GateConfig` in `lab1/solution/gate.py` so the gate blocks the restart (for example, set `blast_radius_max` to 0.01), run Step 1 again and explain the new record. Then restore the limit.
+
+**6. Compare models.** Run Step 3 with two different models, including a small local one. Which ones pass the check most often? The check, not the model, decides what reaches the engineer.
+
+### What to take away
+
+A model can turn a dense record into a clear message in seconds. It can also state things that didn't happen, fluently. Checking its output against the record, and falling back to a template when the check fails, is what makes the message safe to send.
+
+---
+
 ## Cleanup
 
 ```bash
@@ -242,6 +310,7 @@ lab2/
 ├── setup.sh                       🟢 PROVIDED — run once at the start
 ├── teardown.sh                    🟢 PROVIDED — run when done
 ├── autonomous_agent_starter.py    ✏️ IN-CLASS (Step 3) + TAKE-HOME (Steps 4–5)
+├── explain_decision.py            🏠 OPTIONAL TAKE-HOME — model-written message, checked against the record
 ├── solution/
 │   └── autonomous_agent.py        🟢 Reference — look after you attempt the lab
 └── README.md

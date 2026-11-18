@@ -276,6 +276,58 @@ Action: EXECUTED (total wall time ~31ms)
 
 ---
 
+## Take-Home: Swap the Brain, Keep the Harness (optional, uses the Claude API)
+
+The agents in this lab use rules: pattern lists and score bands. That is deliberate. It keeps every decision visible and the safety logic deterministic. In a production APO system, the diagnosis step is where a language model plugs in, and this exercise shows that nothing else has to change when it does.
+
+`llm_logs_agent.py` replaces the rule-based `LogsAgent` with one that asks a Claude model to read the logs. It returns the same `AgentFinding`, with the same name and weight, to the same orchestrator, arbitration rules and gates. **The model is the replaceable part. The harness is what keeps you safe.**
+
+Three rules the model-backed agent follows:
+
+1. **The model names a symptom class and cites log lines. It does not set the confidence.** Code checks that each cited line really exists in the logs and sets confidence from the number of verified lines, using the same bands as the rule-based agent. Invented evidence counts for nothing.
+2. **Any failure falls back to the rules.** No API key, a network error, a timeout or invalid output all degrade to today's behavior, so the pipeline never breaks.
+3. **Simulate mode is the default.** No API call is made unless you pass `--llm`.
+
+### Setup (only for `--llm`)
+
+```bash
+pip install anthropic
+export ANTHROPIC_API_KEY=...            # your own key
+export APO_LLM_MODEL=claude-haiku-5-5   # optional; a small, fast model suits diagnosis
+```
+
+A handful of runs with a small model costs a few cents.
+
+### Steps
+
+**1. Run it with rules (no API call).**
+
+```bash
+python3 lab3/llm_logs_agent.py
+```
+
+The simulated logs describe a payment-service whose threads are stuck waiting on a failing `order-service`. None of the lines contains a phrase in `LogsAgent.LOG_PATTERNS`, so the rule-based agent reports `UNKNOWN` at 0.30.
+
+**2. Run the same logs through the model.**
+
+```bash
+python3 lab3/llm_logs_agent.py --llm
+```
+
+The logs agent should now report `DEPENDENCY_FAILURE`. Look at `LogsAgent evidence` in the output: `cited_lines` is what the model claimed, and `verified_lines` is what the code confirmed. The confidence comes from `verified_lines`, not from the model.
+
+**3. Notice what the harness still decides.** MetricsAgent still says `MEMORY_PRESSURE`. The contradiction rule lowers both scores, and the weighted consensus still picks the metrics finding, so the pods are restarted. That is the right behavior for these rules, and the wrong fix for this incident. Add a rule to `arbitrate()` (in `solution/orchestrator.py`, or your own copy) that lets a root-cause finding beat a symptom finding: for example, a `DEPENDENCY_FAILURE` finding at 0.70 or more wins. Run step 2 again. The catalog has no circuit-breaker action, so ActionAgent now escalates to a human instead of restarting the wrong service.
+
+**4. Break the model on purpose.** Run `--llm` with the key unset, or set `APO_LLM_MODEL` to a name that doesn't exist. The agent falls back to the rules, says why in its evidence, and the pipeline finishes.
+
+**5. Measure the cost in time.** Compare the logs agent's `duration_ms` with rules and with the model. Set it against the 222 ms decision budget from Module 5. This is why the fan-out timeout is raised to 15 seconds when `--llm` is on, and why production systems use small, fast models for diagnosis.
+
+### What to take away
+
+You changed the part that reasons, and the confidence score, the gates and the arbitration rules kept working unchanged. A better model improves the diagnosis. It never gets to skip the checks.
+
+---
+
 ## Advanced Exercises
 
 **A. Circuit breaker:** Add a `CircuitBreaker` class that blocks an agent if it has timed out more than 3 times in the last 5 minutes.
@@ -302,6 +354,7 @@ lab3/
 ├── setup.sh                   🟢 PROVIDED — run once at the start
 ├── teardown.sh                🟢 PROVIDED — run when done
 ├── orchestrator_starter.py    ✏️ IN-CLASS (Steps 2–3) + TAKE-HOME (Steps 4–5)
+├── llm_logs_agent.py          🏠 OPTIONAL TAKE-HOME — LogsAgent backed by a Claude model
 ├── solution/
 │   └── orchestrator.py        🟢 Reference — look after you attempt the lab
 └── README.md

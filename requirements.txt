@@ -16,3 +16,6 @@ pyyaml>=6.0.1
 
 # Optional: async HTTP client (lab3 advanced exercise C — Loki audit stream)
 # httpx>=0.27.0
+
+# Optional: lab3 take-home (llm_logs_agent.py --llm) — calls the Claude API
+# anthropic>=0.40.0
