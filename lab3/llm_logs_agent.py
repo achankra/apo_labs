@@ -164,17 +164,19 @@ class LLMLogsAgent(LogsAgent):
         client = anthropic.Anthropic(timeout=LLM_TIMEOUT_S)
         resp = client.messages.create(
             model=self.model,
-            max_tokens=600,
-            system=SYSTEM_PROMPT,
+            max_tokens=2000,   # room for the model to reason before it answers
+            system=SYSTEM_PROMPT + "\nAlways answer by calling the report_finding tool.",
             tools=[FINDING_TOOL],
-            tool_choice={"type": "tool", "name": "report_finding"},
+            tool_choice={"type": "auto"},   # a forced tool choice is rejected when the model thinks first
             messages=[{"role": "user",
                        "content": f"Logs for {deployment}, last 10 minutes:\n\n{log_text[-12000:]}"}],
         )
         for block in resp.content:
             if getattr(block, "type", "") == "tool_use":
                 return dict(block.input)
-        raise RuntimeError("model returned no structured finding")
+        types = [getattr(b, "type", "?") for b in resp.content]
+        raise RuntimeError(f"model returned no structured finding "
+                           f"(stop_reason={getattr(resp, 'stop_reason', None)}, blocks={types})")
 
     def _rule_based(self, log_text: str, t0: float, reason: str) -> AgentFinding:
         counts: dict[str, int] = {}

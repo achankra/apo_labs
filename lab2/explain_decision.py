@@ -45,7 +45,10 @@ except ImportError:  # requests is in requirements.txt; only needed for --llm
     requests = None
 
 DEFAULT_AUDIT = Path("apo_audit.jsonl")
-TIMEOUT_S = 20
+TIMEOUT_S = 30
+# Some models reason before answering, and that reasoning counts against this budget.
+# 400 tokens was not enough in testing; the visible message itself is short.
+MAX_TOKENS = 2000
 
 SYSTEM_PROMPT = """You write the notification an on-call engineer receives after an
 automated remediation system has acted, or declined to act.
@@ -149,13 +152,18 @@ def ask_model(record: dict) -> tuple[str, str]:
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": model, "max_tokens": 400, "system": SYSTEM_PROMPT,
+            json={"model": model, "max_tokens": MAX_TOKENS, "system": SYSTEM_PROMPT,
                   "messages": [{"role": "user", "content": user}]},
             timeout=TIMEOUT_S,
         )
         resp.raise_for_status()
-        text = "".join(b.get("text", "") for b in resp.json().get("content", []) if b.get("type") == "text")
-        return text.strip(), f"anthropic:{model}"
+        j = resp.json()
+        text = "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text").strip()
+        if not text:
+            types = [b.get("type") for b in j.get("content", [])]
+            raise RuntimeError(f"no text in the reply (stop_reason={j.get('stop_reason')}, blocks={types}); "
+                               f"if stop_reason is max_tokens, the model used its budget thinking — raise MAX_TOKENS")
+        return text, f"anthropic:{model}"
 
     if provider == "openai":
         base = os.environ.get("APO_LLM_BASE_URL")
@@ -168,7 +176,7 @@ def ask_model(record: dict) -> tuple[str, str]:
         resp = requests.post(
             base.rstrip("/") + "/chat/completions",
             headers=headers,
-            json={"model": model, "max_tokens": 400, "temperature": 0,
+            json={"model": model, "max_tokens": MAX_TOKENS, "temperature": 0,
                   "messages": [{"role": "system", "content": SYSTEM_PROMPT},
                                {"role": "user", "content": user}]},
             timeout=TIMEOUT_S,
