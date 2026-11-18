@@ -17,7 +17,7 @@ Three hands-on labs that build a full **detect → diagnose → gate → execute
 
 APO treats platform decisions the way a control system treats actuator commands: every proposed action earns a confidence score, passes a set of safety gates, executes, verifies that it worked, and writes a tamper-evident audit record. These three labs build that pipeline layer by layer — starting with the gates (Lab 1), adding the execution and verification loop (Lab 2), and distributing the diagnosis across specialist agents that run concurrently (Lab 3).
 
-Each lab has a **simulate mode** (`--simulate`) that requires no cluster, no Prometheus, and no Claude API spend. Use it to get through the logic quickly, then switch to real mode for the full experience.
+Each lab has a **simulate mode** (`--simulate`) that requires no cluster, no Prometheus, and no Claude API spend. The workshop runs every lab in simulate mode. Real-cluster mode is optional, for after the workshop; see [Why run a cluster?](#why-run-a-cluster-optional).
 
 ---
 
@@ -30,9 +30,22 @@ Each lab has a **simulate mode** (`--simulate`) that requires no cluster, no Pro
 | Python | 3.11+ | [python.org](https://python.org) | `sudo apt install python3` | [python.org](https://python.org) |
 | Git | any | [git-scm.com](https://git-scm.com) | `sudo apt install git` | [git-scm.com](https://git-scm.com) |
 
+### Why run a cluster? (optional)
+
+All three labs run in simulate mode during the workshop. You don't need a cluster to complete them. Simulate mode teaches the logic: the gates, the confidence score, the agents and the arbitration rules all behave exactly as they do against a live system.
+
+A real cluster shows that logic meeting a real system. On your own time afterwards, it gives you:
+
+- **Live telemetry.** Signal strength (S) and freshness (F) come from real Prometheus readings, so you can inject load or memory pressure and watch the confidence score move.
+- **Real actions.** `kubectl rollout restart` actually restarts pods, and an action the gate blocks really doesn't happen.
+- **The infrastructure time.** Verification waits for real pods to come back, typically 90–120 seconds. In simulate mode this is instant. This wait is Kubernetes, not APO, and it's most of the two minutes an autonomous fix takes.
+- **Real failure modes.** A Prometheus query that times out, a stale scrape, an agent that misses its deadline. These are the situations the gates and escalation paths exist for, and the reason real mode uses a 10-second fan-out timeout instead of 50 ms.
+
+Expect 10–15 minutes of setup on a fresh machine, plus about 8 GB of RAM and 4 CPUs for Docker. Some company-managed laptops can't run Docker; if yours can't, stay with simulate mode.
+
 ### Required for real-cluster mode
 
-> **Do this before the workshop.** Cluster setup takes 10–15 minutes on a fresh machine.
+> **Optional, for after the workshop.** Cluster setup takes 10–15 minutes on a fresh machine.
 
 The real-cluster mode runs a full Kubernetes environment on your laptop using Docker as the container runtime and k3d to manage the cluster lifecycle. The setup below installs that stack from the bottom up: container runtime first, then the Kubernetes layer on top.
 
